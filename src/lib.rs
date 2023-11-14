@@ -1,25 +1,28 @@
+use fancy_regex::Regex;
+use pyo3::exceptions;
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict, PyIterator, PyString};
-extern crate regex;
-use regex::Regex;
 use std::collections::HashMap;
 
-fn tokenize(text: &str, regex: &str) -> Vec<String> {
-    // regex splits
-    let re = Regex::new(regex).unwrap();
-    re.find_iter(text)
-        .map(|mat| mat.as_str().to_string())
-        .collect()
-}
+fn tokenize(text: &str, pattern: &str) -> Vec<Vec<Vec<u8>>> {
+    let regex = Regex::new(pattern);
 
-fn convert_to_tokenized_bytes(tokenized_text: Vec<String>) -> Vec<Vec<Vec<u8>>> {
     let mut tokenized_bytes: Vec<Vec<Vec<u8>>> = Vec::new();
-    for token in tokenized_text {
-        let mut tokenized_byte: Vec<Vec<u8>> = Vec::new();
-        for byte in token.bytes() {
-            tokenized_byte.push(vec![byte]);
+
+    for match_result in regex.expect(pattern).find_iter(text) {
+        match match_result {
+            Ok(token) => {
+                let mut tokenized_byte: Vec<Vec<u8>> = Vec::new();
+                for byte in token.as_str().bytes() {
+                    tokenized_byte.push(vec![byte]);
+                }
+                tokenized_bytes.push(tokenized_byte);
+            }
+            Err(e) => {
+                println!("Error: {:?}", e);
+                break;
+            }
         }
-        tokenized_bytes.push(tokenized_byte);
     }
     tokenized_bytes
 }
@@ -134,14 +137,32 @@ fn train_bpe(
     let iterator = PyIterator::from_object(py, &iterator)?;
     let regex = python_regex.to_str()?;
 
+    // validate inputs
+    if max_token_length < 2 {
+        return Err(exceptions::PyValueError::new_err(
+            "max_token_length must be greater than 1",
+        ));
+    }
+    if vocab_size < 1 {
+        return Err(exceptions::PyValueError::new_err(
+            "vocab_size must be greater than 0",
+        ));
+    }
+    if regex.is_empty() {
+        return Err(exceptions::PyValueError::new_err("regex cannot be empty"));
+    }
+
     let mut tokenized_bytes: Vec<Vec<Vec<u8>>> = Vec::new();
 
     // split all text into tokens
     for item in iterator {
         let item: &PyString = item?.extract()?;
         let text = item.to_str()?;
-        let tokens = tokenize(text, regex);
-        let tokens_bytes = convert_to_tokenized_bytes(tokens);
+        if text.is_empty() {
+            continue;
+        }
+
+        let tokens_bytes = tokenize(text, regex);
         tokenized_bytes.extend(tokens_bytes);
     }
 
@@ -173,19 +194,32 @@ mod tests {
 
     #[test]
     fn test_tokenize() {
-        let text = "Your text data here";
+        let text = "a b c";
         let regex = r"([^\s]+)|(\s+)";
         let tokens = tokenize(text, regex);
-        assert_eq!(tokens, vec!["Your", " ", "text", " ", "data", " ", "here"]);
+        // assert no error
+        // assert!(tokens.is_ok());
+
+        assert_eq!(
+            tokens,
+            vec![
+                vec![vec![97]],
+                vec![vec![32]],
+                vec![vec![98]],
+                vec![vec![32]],
+                vec![vec![99]]
+            ]
+        );
     }
 
     #[test]
     fn test_all() {
         let text: &str = "\tYou hear £ £ £ here";
         let regex = r"([^\s]+)|(\s+)";
-        let tokens = tokenize(text, regex);
-        println!("{:?}", tokens);
-        let tokenized_bytes = convert_to_tokenized_bytes(tokens);
+        // let tokens = tokenize(text, regex);
+        // println!("{:?}", tokens);
+        // let tokenized_bytes = convert_to_tokenized_bytes(tokens);
+        let tokenized_bytes = tokenize(text, regex);
         println!("{:?}", tokenized_bytes);
 
         let vocab_size = 10;
@@ -193,5 +227,11 @@ mod tests {
         let bpe_vocab = build_bpe_vocab(tokenized_bytes, max_token_length, vocab_size);
         println!("{:?}", bpe_vocab);
         // Output or use the encoded text
+    }
+
+    #[test]
+    fn test_initialize_vocab_bytes() {
+        let vocab = initialize_vocab_bytes();
+        assert_eq!(vocab.len(), 255);
     }
 }
