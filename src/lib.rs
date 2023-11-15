@@ -2,7 +2,9 @@ use fancy_regex::Regex;
 use pyo3::exceptions;
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict, PyIterator, PyString};
+use rayon::prelude::*;
 use std::collections::HashMap;
+use std::sync::Mutex;
 
 fn tokenize(text: &str, pattern: &str) -> Vec<Vec<Vec<u8>>> {
     let regex = Regex::new(pattern);
@@ -44,6 +46,8 @@ fn get_most_frequent_pair(
     Return the most frequent pair of bytes
     */
 
+    // Calculate frequencies for each pair of bytes in all sentences and words
+    // uses mutex to allow parallel processing through rayon
     let mut pair_freqs: HashMap<(Vec<u8>, Vec<u8>), u128> = HashMap::new();
 
     // Calculate frequencies for each pair of bytes in all sentences and words
@@ -58,13 +62,36 @@ fn get_most_frequent_pair(
             }
         }
     }
-    // println!("{:?}", pair_freqs);
+
+    // let pair_freqs: Mutex<HashMap<(Vec<u8>, Vec<u8>), u128>> = Mutex::new(HashMap::new());
+    // tokenized_bytes.par_iter().for_each(|sentence| {
+    //     let mut local_freqs = HashMap::new();
+    //     for word in sentence.windows(2) {
+    //         if word[0].len() + word[1].len() > max_token_length {
+    //             continue;
+    //         }
+    //         if let [a, b] = word {
+    //             *local_freqs.entry((a.to_vec(), b.to_vec())).or_insert(0) += 1;
+    //         }
+    //     }
+
+    //     let mut global_freqs = pair_freqs.lock().unwrap();
+    //     for (pair, count) in local_freqs {
+    //         *global_freqs.entry(pair).or_insert(0) += count;
+    //     }
+    // });
+    // let pair_freqs = pair_freqs.into_inner().unwrap();
     let most_frequent_pair = pair_freqs.iter().max_by_key(|&(_, count)| count);
-    println!("Most frequent pair: {:?}", most_frequent_pair);
     if most_frequent_pair.is_none() {
         return None;
     }
     let ((ref left, ref right), _count) = most_frequent_pair.unwrap();
+
+    println!(
+        "Most frequent pair: {:?} and count {}",
+        (left, right),
+        _count
+    );
     Some((left.clone(), right.clone()))
 }
 
@@ -131,13 +158,16 @@ fn build_bpe_vocab(
 #[pyfunction]
 fn train_bpe(
     py: Python,
-    iterator: PyObject,
+    iterator: &PyIterator,
     python_regex: &PyString,
     max_token_length: usize,
     vocab_size: usize,
 ) -> PyResult<PyObject> {
-    let iterator = PyIterator::from_object(py, &iterator)?;
     let regex = python_regex.to_str()?;
+
+    println!("STARTING BPEasy training");
+    let num_threads = rayon::current_num_threads();
+    println!("Number of threads: {}", num_threads);
 
     // validate inputs
     if max_token_length < 2 {
@@ -154,8 +184,34 @@ fn train_bpe(
         return Err(exceptions::PyValueError::new_err("regex cannot be empty"));
     }
 
-    let mut tokenized_bytes: Vec<Vec<Vec<u8>>> = Vec::new();
+    // let mut tokenized_bytes: Vec<Vec<Vec<u8>>> = Vec::new();
+    // let tokenized_bytes = Mutex::new(Vec::new());
 
+    // Extract strings from Python iterator and store them in a Rust Vec for parallel processing
+    // let strings: Vec<&str> = iterator
+    //     .filter_map(|item_result| {
+    //         item_result.ok().and_then(|item| {
+    //             item.extract::<&PyString>()
+    //                 .ok()
+    //                 .and_then(|py_string| py_string.to_str().ok())
+    //         })
+    //     })
+    //     .collect();
+
+    // // split all text into tokens
+    // strings.par_iter().for_each(|text| {
+    //     if !text.is_empty() {
+    //         // println!("Text: {:?}", text);
+    //         let tokens_bytes = tokenize(text, regex);
+    //         // Lock the mutex and extend the vector
+    //         let mut tokenized_bytes_lock = tokenized_bytes.lock().unwrap();
+    //         tokenized_bytes_lock.extend(tokens_bytes);
+    //     }
+    // });
+
+    // let tokenized_bytes = tokenized_bytes.into_inner().unwrap();
+
+    let mut tokenized_bytes: Vec<Vec<Vec<u8>>> = Vec::new();
     // split all text into tokens
     for item in iterator {
         let item: &PyString = item?.extract()?;
@@ -167,6 +223,7 @@ fn train_bpe(
         tokenized_bytes.extend(tokens_bytes);
     }
 
+    println!("Done tokenizing");
     let bpe_vocab = build_bpe_vocab(tokenized_bytes, max_token_length, vocab_size);
     let python_dict_out = PyDict::new(py);
 

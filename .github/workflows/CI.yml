@@ -58,7 +58,7 @@ jobs:
           cargo test
           maturin develop
           pytest tests --cov=foobar --cov-report xml
-          cargo llvm-cov --no-run --lcov --output-path coverage.lcov
+          cargo llvm-cov report --lcov --output-path coverage.lcov
       - uses: codecov/codecov-action@v3
         with:
           files: coverage.lcov,coverage.xml
