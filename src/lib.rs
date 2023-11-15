@@ -47,6 +47,7 @@ fn get_most_frequent_pair(
     let mut pair_freqs: HashMap<(Vec<u8>, Vec<u8>), u128> = HashMap::new();
 
     // Calculate frequencies for each pair of bytes in all sentences and words
+    // NOTE: Could be parallelized over sentences
     for sentence in tokenized_bytes {
         for word in sentence.windows(2) {
             if word[0].len() + word[1].len() > max_token_length {
@@ -69,6 +70,7 @@ fn get_most_frequent_pair(
 
 fn merge_frequent_pair(tokenized_bytes: &mut Vec<Vec<Vec<u8>>>, left: Vec<u8>, right: Vec<u8>) {
     // Merge the most frequent pair in all sentences and words
+    // NOTE: Could be parallelized over sentences
     for sentence in tokenized_bytes.iter_mut() {
         let mut i = 0;
         while i < sentence.len() - 1 {
@@ -161,7 +163,6 @@ fn train_bpe(
         if text.is_empty() {
             continue;
         }
-
         let tokens_bytes = tokenize(text, regex);
         tokenized_bytes.extend(tokens_bytes);
     }
@@ -178,9 +179,9 @@ fn train_bpe(
     Ok(python_dict_out.into())
 }
 
-/// A Python module implemented in Rust. The name of this function must match
-/// the `lib.name` setting in the `Cargo.toml`, else Python will not be able to
-/// import the module.
+/// bpeasy is a bare-bones implementation of byte-pair encoding (BPE) in Rust.
+/// It is designed to be used as a Python module and returns a byte-pair vocabulary
+/// as a Python dictionary.
 #[pymodule]
 fn bpeasy(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(train_bpe, m)?)?;
@@ -197,9 +198,6 @@ mod tests {
         let text = "a b c";
         let regex = r"([^\s]+)|(\s+)";
         let tokens = tokenize(text, regex);
-        // assert no error
-        // assert!(tokens.is_ok());
-
         assert_eq!(
             tokens,
             vec![
@@ -216,9 +214,6 @@ mod tests {
     fn test_all() {
         let text: &str = "\tYou hear £ £ £ here";
         let regex = r"([^\s]+)|(\s+)";
-        // let tokens = tokenize(text, regex);
-        // println!("{:?}", tokens);
-        // let tokenized_bytes = convert_to_tokenized_bytes(tokens);
         let tokenized_bytes = tokenize(text, regex);
         println!("{:?}", tokenized_bytes);
 
@@ -226,7 +221,6 @@ mod tests {
         let max_token_length = 128;
         let bpe_vocab = build_bpe_vocab(tokenized_bytes, max_token_length, vocab_size);
         println!("{:?}", bpe_vocab);
-        // Output or use the encoded text
     }
 
     #[test]
