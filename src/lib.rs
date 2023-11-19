@@ -3,8 +3,38 @@ use pyo3::exceptions;
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict, PyIterator, PyString};
 use rayon::prelude::*;
-use std::collections::HashMap;
+use std::cmp::Ordering;
+use std::collections::{BinaryHeap, HashMap, HashSet};
 use std::sync::Mutex;
+
+#[derive(Debug, Eq)]
+struct Merge {
+    pair: (Vec<u8>, Vec<u8>),
+    count: u128,
+    pos: HashSet<u128>,
+}
+impl PartialEq for Merge {
+    fn eq(&self, other: &Self) -> bool {
+        self.count == other.count && self.pair == other.pair
+    }
+}
+impl PartialOrd for Merge {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+impl Ord for Merge {
+    fn cmp(&self, other: &Self) -> Ordering {
+        if self.count != other.count {
+            self.count.cmp(&other.count)
+        } else {
+            // Here we want ascending order
+            other.pair.cmp(&self.pair)
+        }
+    }
+}
+
+type Pair = (Vec<u8>, Vec<u8>);
 
 fn tokenize(text: &str, pattern: &str) -> Vec<Vec<Vec<u8>>> {
     let regex = Regex::new(pattern);
@@ -38,82 +68,62 @@ fn initialize_vocab_bytes() -> HashMap<Vec<u8>, u64> {
 }
 
 fn get_most_frequent_pair(
-    tokenized_bytes: &mut Vec<Vec<Vec<u8>>>,
+    tokenized_bytes: &[Vec<Vec<u8>>],
     max_token_length: usize,
-) -> Option<(Vec<u8>, Vec<u8>)> {
-    /*
-    Calculate frequencies for each pair of bytes in all sentences and words
-    Return the most frequent pair of bytes
-    */
-
+) -> (HashMap<Pair, u128>, HashMap<Pair, HashSet<u128>>) {
     // Calculate frequencies for each pair of bytes in all sentences and words
-    // uses mutex to allow parallel processing through rayon
-    let mut pair_freqs: HashMap<(Vec<u8>, Vec<u8>), u128> = HashMap::new();
+    return tokenized_bytes
+        .par_iter()
+        .enumerate()
+        .map(|(i, sentence)| {
+            let mut local_pair_counts = HashMap::new();
+            let mut local_pair_positions = HashMap::new();
+            // let mut local_freqs = HashMap::new();
+            for word in sentence.windows(2) {
+                if word[0].len() + word[1].len() > max_token_length {
+                    continue;
+                }
+                let current_pair: Pair = (word[0].to_vec(), word[1].to_vec());
 
-    // Calculate frequencies for each pair of bytes in all sentences and words
-    // NOTE: Could be parallelized over sentences
-    for sentence in tokenized_bytes {
-        for word in sentence.windows(2) {
-            if word[0].len() + word[1].len() > max_token_length {
-                continue;
+                // Initialize pair_counts for this pair if we just saw it for the first time
+                local_pair_counts
+                    .entry(current_pair.clone())
+                    .and_modify(|c| *c += 1)
+                    .or_insert(1 as u128);
+
+                // Then update position
+                local_pair_positions
+                    .entry(current_pair)
+                    .and_modify(|h: &mut HashSet<u128>| {
+                        h.insert(i as u128);
+                    })
+                    .or_insert_with(|| {
+                        let mut h = HashSet::new();
+                        h.insert(i as u128);
+                        h
+                    });
             }
-            if let [a, b] = word {
-                *pair_freqs.entry((a.to_vec(), b.to_vec())).or_insert(0) += 1;
-            }
-        }
-    }
-
-    // let pair_freqs: Mutex<HashMap<(Vec<u8>, Vec<u8>), u128>> = Mutex::new(HashMap::new());
-    // tokenized_bytes.par_iter().for_each(|sentence| {
-    //     let mut local_freqs = HashMap::new();
-    //     for word in sentence.windows(2) {
-    //         if word[0].len() + word[1].len() > max_token_length {
-    //             continue;
-    //         }
-    //         if let [a, b] = word {
-    //             *local_freqs.entry((a.to_vec(), b.to_vec())).or_insert(0) += 1;
-    //         }
-    //     }
-
-    //     let mut global_freqs = pair_freqs.lock().unwrap();
-    //     for (pair, count) in local_freqs {
-    //         *global_freqs.entry(pair).or_insert(0) += count;
-    //     }
-    // });
-    // let pair_freqs = pair_freqs.into_inner().unwrap();
-    let most_frequent_pair = pair_freqs.iter().max_by_key(|&(_, count)| count);
-    if most_frequent_pair.is_none() {
-        return None;
-    }
-    let ((ref left, ref right), _count) = most_frequent_pair.unwrap();
-
-    println!(
-        "Most frequent pair: {:?} and count {}",
-        (left, right),
-        _count
-    );
-    Some((left.clone(), right.clone()))
-}
-
-fn merge_frequent_pair(tokenized_bytes: &mut Vec<Vec<Vec<u8>>>, left: Vec<u8>, right: Vec<u8>) {
-    // Merge the most frequent pair in all sentences and words
-    // NOTE: Could be parallelized over sentences
-    for sentence in tokenized_bytes.iter_mut() {
-        let mut i = 0;
-        while i < sentence.len() - 1 {
-            // Check if the current and next token form the most frequent pair
-            if sentence[i] == left.clone() && sentence[i + 1] == right.clone() {
-                // Merge the pair and replace the first element with the merged pair
-                let merged = [&sentence[i][..], &sentence[i + 1][..]].concat();
-                sentence[i] = merged;
-                // Remove the second element of the pair
-                sentence.remove(i + 1);
-                // Do not increment i, as we want to check the next pair starting from the current position
-            } else {
-                i += 1; // Move to the next token
-            }
-        }
-    }
+            (local_pair_counts, local_pair_positions)
+        })
+        .reduce(
+            || (HashMap::new(), HashMap::new()),
+            |(mut global_pair_counts, mut global_pair_positions), (pc, wtu)| {
+                // Merge the pair counts and positions from all sentences
+                for (k, v) in pc {
+                    global_pair_counts
+                        .entry(k)
+                        .and_modify(|c| *c += v)
+                        .or_insert(v);
+                }
+                for (k, v) in wtu {
+                    global_pair_positions
+                        .entry(k)
+                        .and_modify(|set| *set = set.union(&v).copied().collect())
+                        .or_insert(v);
+                }
+                (global_pair_counts, global_pair_positions)
+            },
+        );
 }
 
 fn build_bpe_vocab(
@@ -123,34 +133,184 @@ fn build_bpe_vocab(
 ) -> HashMap<Vec<u8>, u64> {
     let mut vocab: HashMap<Vec<u8>, u64> = initialize_vocab_bytes();
 
-    println!("{:?}", vocab);
+    let (mut global_pair_counts, mut global_pair_positions) =
+        get_most_frequent_pair(&tokenized_bytes, max_token_length);
+
+    // build Priority Queue from counts and positions
+    let mut queue: BinaryHeap<Merge> = BinaryHeap::new();
+    global_pair_positions.drain().for_each(|(pair, pos)| {
+        let count: u128 = global_pair_counts[&pair];
+        if count > 0 {
+            queue.push(Merge { pair, count, pos });
+        }
+    });
 
     let mut num_token_added = 0;
     while num_token_added < vocab_size {
-        println!("Iteration: {}", num_token_added);
-
-        let most_frequent_pair = get_most_frequent_pair(&mut tokenized_bytes, max_token_length);
-        if most_frequent_pair.is_none() {
+        if queue.is_empty() {
             break;
         }
-        let (left, right) = most_frequent_pair.unwrap();
+        let mut top = queue.pop().unwrap();
 
-        // Merge the most frequent pair in all sentences and words
-        merge_frequent_pair(&mut tokenized_bytes, left.clone(), right.clone());
+        if top.count != global_pair_counts[&top.pair] {
+            println!("Updating count for {:?}", top.pair);
+            top.count = global_pair_counts[&top.pair];
+            queue.push(top);
+            continue;
+        }
 
-        let mut token = left.clone(); // Clone the first token
-        token.extend(right); // Extend with the second token
-                             // Now, combined_token contains the merged pair
-        println!("Combined token: {:?}", token);
+        if top.count < 1 {
+            break;
+        }
 
-        // combine pair into a single token
-        let token_str = String::from_utf8_lossy(&token);
-        println!("Token added: {:?}", token_str);
-        vocab.insert(token, vocab.len() as u64);
-
+        // add to vocab
+        let (left, right) = top.pair;
+        let merged = [&left[..], &right[..]].concat();
+        vocab.insert(merged.clone(), vocab.len() as u64);
         num_token_added += 1;
+
+        let token_str = String::from_utf8_lossy(&merged);
+        println!("Token added: {:?}", token_str);
+        println!("Pair: {:?}", (left.clone(), right.clone()));
+        println!("Count: {}", top.count);
+
+        // update counts and positions
+        let mut new_merges: HashSet<Pair> = HashSet::new();
+        top.pos.iter().for_each(|&i| {
+            // let mut changes = vec![];
+            let mut j = 0;
+            while j < tokenized_bytes[i as usize].len() - 1 {
+                if tokenized_bytes[i as usize][j] == left
+                    && tokenized_bytes[i as usize][j + 1] == right
+                {
+                    println!("Found pair at position: {}", j);
+                    // decrement count for old pairs
+                    if j > 0 {
+                        let prev = tokenized_bytes[i as usize][j - 1].clone();
+                        global_pair_counts
+                            .entry((prev.clone(), left.clone()))
+                            .and_modify(|c| {
+                                if *c > 0 {
+                                    *c -= 1
+                                }
+                            })
+                            .or_insert(0);
+                        // remove i from global_pair_positions
+                        global_pair_positions
+                            .entry((prev.clone(), left.clone()))
+                            .and_modify(|set| {
+                                set.remove(&i);
+                                if set.is_empty() {
+                                    set.remove(&(i as u128));
+                                }
+                            });
+                    }
+                    if j < tokenized_bytes[i as usize].len() - 2 {
+                        let next = tokenized_bytes[i as usize][j + 2].clone();
+                        println!("decrementing : {:?}", (right.clone(), next.clone()));
+                        global_pair_counts
+                            .entry((right.clone(), next.clone()))
+                            .and_modify(|c| {
+                                if *c > 0 {
+                                    *c -= 1
+                                }
+                            })
+                            .or_insert(0);
+                        println!(
+                            "count after decrement: {}",
+                            global_pair_counts[&(right.clone(), next.clone())]
+                        );
+
+                        // remove i from global_pair_positions
+                        global_pair_positions
+                            .entry((right.clone(), next.clone()))
+                            .and_modify(|set| {
+                                set.remove(&i);
+                                if set.is_empty() {
+                                    set.remove(&(i as u128));
+                                }
+                            });
+                    }
+
+                    // Merge the pair and replace the first element with the merged pair
+                    let merged = [
+                        &tokenized_bytes[i as usize][j][..],
+                        &tokenized_bytes[i as usize][j + 1][..],
+                    ]
+                    .concat();
+                    tokenized_bytes[i as usize][j] = merged.clone();
+
+                    // Remove the second element of the pair
+                    tokenized_bytes[i as usize].remove(j + 1);
+
+                    // increment count for new pairs
+                    if j > 0
+                        && merged.len() + tokenized_bytes[i as usize][j - 1].len()
+                            < max_token_length
+                    {
+                        let prev = tokenized_bytes[i as usize][j - 1].clone();
+
+                        global_pair_counts
+                            .entry((prev.clone(), merged.clone()))
+                            .and_modify(|c| *c += 1)
+                            .or_insert(1);
+                        global_pair_positions
+                            .entry((prev.clone(), merged.clone()))
+                            .and_modify(|set| {
+                                let new_items: HashSet<_> = vec![i].into_iter().collect();
+                                *set = set.union(&new_items).copied().collect();
+                            })
+                            .or_insert_with(|| {
+                                let mut new_set = HashSet::new();
+                                new_set.insert(i);
+                                new_set
+                            });
+
+                        // add to new_merges
+                        new_merges.insert((prev.clone(), merged.clone()));
+                    }
+                    if j < tokenized_bytes[i as usize].len() - 1
+                        && merged.len() + tokenized_bytes[i as usize][j + 1].len()
+                            < max_token_length
+                    {
+                        let next = tokenized_bytes[i as usize][j + 1].clone();
+                        println!("incrementing : {:?}", (merged.clone(), next.clone()));
+                        global_pair_counts
+                            .entry((merged.clone(), next.clone()))
+                            .and_modify(|c| *c += 1)
+                            .or_insert(1);
+                        println!(
+                            "count after increment: {}",
+                            global_pair_counts[&(merged.clone(), next.clone())]
+                        );
+                        global_pair_positions
+                            .entry((merged.clone(), next.clone()))
+                            .and_modify(|set| {
+                                let new_items: HashSet<_> = vec![i].into_iter().collect();
+                                *set = set.union(&new_items).copied().collect();
+                            })
+                            .or_insert_with(|| {
+                                let mut new_set = HashSet::new();
+                                new_set.insert(i);
+                                new_set
+                            });
+                        new_merges.insert((merged.clone(), next.clone()));
+                    }
+                }
+                j += 1; // Move to the next token
+            }
+        });
+        // update queue
+        new_merges.iter().for_each(|pair| {
+            let count = global_pair_counts[pair];
+            let pos = global_pair_positions[pair].clone();
+            queue.push(Merge {
+                pair: pair.clone(),
+                count,
+                pos,
+            });
+        });
     }
-    // print_vocab_bytes(&vocab);
     vocab
 }
 
@@ -184,49 +344,35 @@ fn train_bpe(
         return Err(exceptions::PyValueError::new_err("regex cannot be empty"));
     }
 
-    // let mut tokenized_bytes: Vec<Vec<Vec<u8>>> = Vec::new();
-    // let tokenized_bytes = Mutex::new(Vec::new());
+    let tokenized_bytes = Mutex::new(Vec::new());
 
     // Extract strings from Python iterator and store them in a Rust Vec for parallel processing
-    // let strings: Vec<&str> = iterator
-    //     .filter_map(|item_result| {
-    //         item_result.ok().and_then(|item| {
-    //             item.extract::<&PyString>()
-    //                 .ok()
-    //                 .and_then(|py_string| py_string.to_str().ok())
-    //         })
-    //     })
-    //     .collect();
+    let strings: Vec<&str> = iterator
+        .filter_map(|item_result| {
+            item_result.ok().and_then(|item| {
+                item.extract::<&PyString>()
+                    .ok()
+                    .and_then(|py_string| py_string.to_str().ok())
+            })
+        })
+        .collect();
 
-    // // split all text into tokens
-    // strings.par_iter().for_each(|text| {
-    //     if !text.is_empty() {
-    //         // println!("Text: {:?}", text);
-    //         let tokens_bytes = tokenize(text, regex);
-    //         // Lock the mutex and extend the vector
-    //         let mut tokenized_bytes_lock = tokenized_bytes.lock().unwrap();
-    //         tokenized_bytes_lock.extend(tokens_bytes);
-    //     }
-    // });
-
-    // let tokenized_bytes = tokenized_bytes.into_inner().unwrap();
-
-    let mut tokenized_bytes: Vec<Vec<Vec<u8>>> = Vec::new();
     // split all text into tokens
-    for item in iterator {
-        let item: &PyString = item?.extract()?;
-        let text = item.to_str()?;
-        if text.is_empty() {
-            continue;
+    strings.par_iter().for_each(|text| {
+        if !text.is_empty() {
+            // println!("Text: {:?}", text);
+            let tokens_bytes = tokenize(text, regex);
+            // Lock the mutex and extend the vector
+            let mut tokenized_bytes_lock = tokenized_bytes.lock().unwrap();
+            tokenized_bytes_lock.extend(tokens_bytes);
         }
-        let tokens_bytes = tokenize(text, regex);
-        tokenized_bytes.extend(tokens_bytes);
-    }
+    });
+
+    let tokenized_bytes = tokenized_bytes.into_inner().unwrap();
 
     println!("Done tokenizing");
     let bpe_vocab = build_bpe_vocab(tokenized_bytes, max_token_length, vocab_size);
     let python_dict_out = PyDict::new(py);
-
     // convert bpe_vocab to python dict
     for (key, value) in bpe_vocab {
         let py_key = PyBytes::new(py, &key);
