@@ -11,7 +11,7 @@ use std::sync::Mutex;
 struct Merge {
     pair: (Vec<u8>, Vec<u8>),
     count: u128,
-    pos: HashSet<u128>,
+    pos: HashSet<usize>,
 }
 impl PartialEq for Merge {
     fn eq(&self, other: &Self) -> bool {
@@ -70,7 +70,7 @@ fn initialize_vocab_bytes() -> HashMap<Vec<u8>, u64> {
 fn get_most_frequent_pair(
     tokenized_bytes: &[Vec<Vec<u8>>],
     max_token_length: usize,
-) -> (HashMap<Pair, u128>, HashMap<Pair, HashSet<u128>>) {
+) -> (HashMap<Pair, u128>, HashMap<Pair, HashSet<usize>>) {
     // Calculate frequencies for each pair of bytes in all sentences and words
     return tokenized_bytes
         .par_iter()
@@ -78,7 +78,6 @@ fn get_most_frequent_pair(
         .map(|(i, sentence)| {
             let mut local_pair_counts = HashMap::new();
             let mut local_pair_positions = HashMap::new();
-            // let mut local_freqs = HashMap::new();
             for word in sentence.windows(2) {
                 if word[0].len() + word[1].len() > max_token_length {
                     continue;
@@ -94,12 +93,12 @@ fn get_most_frequent_pair(
                 // Then update position
                 local_pair_positions
                     .entry(current_pair)
-                    .and_modify(|h: &mut HashSet<u128>| {
-                        h.insert(i as u128);
+                    .and_modify(|h: &mut HashSet<usize>| {
+                        h.insert(i);
                     })
                     .or_insert_with(|| {
                         let mut h = HashSet::new();
-                        h.insert(i as u128);
+                        h.insert(i);
                         h
                     });
             }
@@ -153,7 +152,6 @@ fn build_bpe_vocab(
         let mut top = queue.pop().unwrap();
 
         if top.count != global_pair_counts[&top.pair] {
-            println!("Updating count for {:?}", top.pair);
             top.count = global_pair_counts[&top.pair];
             queue.push(top);
             continue;
@@ -171,22 +169,17 @@ fn build_bpe_vocab(
 
         let token_str = String::from_utf8_lossy(&merged);
         println!("Token added: {:?}", token_str);
-        println!("Pair: {:?}", (left.clone(), right.clone()));
-        println!("Count: {}", top.count);
 
         // update counts and positions
         let mut new_merges: HashSet<Pair> = HashSet::new();
         top.pos.iter().for_each(|&i| {
             // let mut changes = vec![];
             let mut j = 0;
-            while j < tokenized_bytes[i as usize].len() - 1 {
-                if tokenized_bytes[i as usize][j] == left
-                    && tokenized_bytes[i as usize][j + 1] == right
-                {
-                    println!("Found pair at position: {}", j);
+            while j < tokenized_bytes[i].len() - 1 {
+                if tokenized_bytes[i][j] == left && tokenized_bytes[i][j + 1] == right {
                     // decrement count for old pairs
                     if j > 0 {
-                        let prev = tokenized_bytes[i as usize][j - 1].clone();
+                        let prev = tokenized_bytes[i][j - 1].clone();
                         global_pair_counts
                             .entry((prev.clone(), left.clone()))
                             .and_modify(|c| {
@@ -201,13 +194,12 @@ fn build_bpe_vocab(
                             .and_modify(|set| {
                                 set.remove(&i);
                                 if set.is_empty() {
-                                    set.remove(&(i as u128));
+                                    set.remove(&i);
                                 }
                             });
                     }
-                    if j < tokenized_bytes[i as usize].len() - 2 {
-                        let next = tokenized_bytes[i as usize][j + 2].clone();
-                        println!("decrementing : {:?}", (right.clone(), next.clone()));
+                    if j < tokenized_bytes[i].len() - 2 {
+                        let next = tokenized_bytes[i][j + 2].clone();
                         global_pair_counts
                             .entry((right.clone(), next.clone()))
                             .and_modify(|c| {
@@ -216,18 +208,13 @@ fn build_bpe_vocab(
                                 }
                             })
                             .or_insert(0);
-                        println!(
-                            "count after decrement: {}",
-                            global_pair_counts[&(right.clone(), next.clone())]
-                        );
-
                         // remove i from global_pair_positions
                         global_pair_positions
                             .entry((right.clone(), next.clone()))
                             .and_modify(|set| {
                                 set.remove(&i);
                                 if set.is_empty() {
-                                    set.remove(&(i as u128));
+                                    set.remove(&i);
                                 }
                             });
                     }
@@ -274,15 +261,10 @@ fn build_bpe_vocab(
                             < max_token_length
                     {
                         let next = tokenized_bytes[i as usize][j + 1].clone();
-                        println!("incrementing : {:?}", (merged.clone(), next.clone()));
                         global_pair_counts
                             .entry((merged.clone(), next.clone()))
                             .and_modify(|c| *c += 1)
                             .or_insert(1);
-                        println!(
-                            "count after increment: {}",
-                            global_pair_counts[&(merged.clone(), next.clone())]
-                        );
                         global_pair_positions
                             .entry((merged.clone(), next.clone()))
                             .and_modify(|set| {
@@ -301,14 +283,16 @@ fn build_bpe_vocab(
             }
         });
         // update queue
-        new_merges.iter().for_each(|pair| {
-            let count = global_pair_counts[pair];
-            let pos = global_pair_positions[pair].clone();
-            queue.push(Merge {
-                pair: pair.clone(),
-                count,
-                pos,
-            });
+        new_merges.drain().for_each(|pair| {
+            let count = global_pair_counts[&pair];
+            let pos = global_pair_positions[&pair].clone();
+            if count > 0 {
+                queue.push(Merge {
+                    pair: pair.clone(),
+                    count,
+                    pos,
+                });
+            }
         });
     }
     vocab
