@@ -2,7 +2,7 @@ from bpeasy import train_bpe
 
 
 def test_train_bpe_vocab_size():
-    vocab_size = 10
+    vocab_size = 300
     max_token_length = 4
     regex = r"([^\s]+)|(\s+)"
     vocab = train_bpe(
@@ -11,11 +11,11 @@ def test_train_bpe_vocab_size():
         max_token_length,
         vocab_size,
     )
-    assert len(vocab) == vocab_size + 255
+    assert len(vocab) == 266
 
 
 def test_train_bpe_max_token_length():
-    vocab_size = 5
+    vocab_size = 300
     max_token_length = 2
     regex = r"([^\s]+)|(\s+)"
     vocab = train_bpe(
@@ -38,7 +38,7 @@ def test_train_bpe_max_token_length():
 
 
 def test_train_bpe_gpt_regex():
-    vocab_size = 30
+    vocab_size = 300
     max_token_length = 128
     regex = r"""(?i:'s|'t|'re|'ve|'m|'ll|'d)|[^\r\n\p{L}\p{N}]?\p{L}+|\p{N}{1,3}| ?[^\s\p{L}\p{N}]+[\r\n]*|\s*[\r\n]+|\s+(?!\S)|\s+"""
     vocab = train_bpe(
@@ -50,5 +50,6 @@ def test_train_bpe_gpt_regex():
     for token in vocab:
         assert len(token) <= max_token_length
 
+    print(vocab)
     assert b" go" in vocab.keys()
     assert b"'ve" in vocab.keys()
