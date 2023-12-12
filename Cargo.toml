@@ -7,10 +7,6 @@ edition = "2021"
 name = "bpeasy"
 crate-type = ["cdylib"]
 
-[[bin]]
-name = "bench_train"
-path = "src/bin/bench_train.rs"
-
 [profile.release]
 opt-level = 3
 lto = "fat"
