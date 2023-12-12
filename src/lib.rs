@@ -5,7 +5,6 @@ use pyo3::types::{PyBytes, PyDict, PyIterator, PyString};
 use rayon::prelude::*;
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap, HashSet};
-use std::sync::Arc;
 
 type Pair = (u32, u32);
 
@@ -124,7 +123,7 @@ impl Sentence {
         self.symbols.iter().map(|s| s.c).collect()
     }
 
-    fn from_str(s: String) -> Self {
+    fn from_str(s: &str) -> Self {
         let mut sentence = Sentence::new();
         for byte in s.bytes() {
             sentence.add(byte as u32, 1);
@@ -133,25 +132,23 @@ impl Sentence {
     }
 }
 
-fn pretokenize(text: &str, regex: Arc<Regex>) -> Vec<String> {
+fn pretokenize<'a>(text: &'a str, regex: &Regex) -> Vec<&'a str> {
     regex
         .find_iter(text)
-        .map(|mat| match mat {
-            Ok(token) => token.as_str().to_string(),
-            Err(e) => {
-                println!("Error: {:?}", e);
-                "".to_string()
-            }
+        .filter_map(|mat| match mat {
+            Ok(m) => Some(m.as_str()),
+            Err(_) => None,
         })
         .collect()
 }
 
 fn pretokenize_strings(strings: Vec<&str>, pattern: &str) -> (Vec<Sentence>, Vec<u64>) {
-    let regex = Arc::new(Regex::new(pattern).expect("Invalid regex pattern"));
-    let (tokens, counts): (Vec<String>, Vec<u64>) = strings
+    let regex = Regex::new(pattern).expect("Invalid regex pattern");
+    let time = std::time::Instant::now();
+    let (tokens, counts): (Vec<&str>, Vec<u64>) = strings
         .par_iter()
         .filter(|text| !text.is_empty())
-        .flat_map(|&text| pretokenize(text, Arc::clone(&regex)))
+        .flat_map(|&text| pretokenize(text, &regex))
         .fold(
             || HashMap::new(),
             |mut acc, token| {
@@ -171,7 +168,10 @@ fn pretokenize_strings(strings: Vec<&str>, pattern: &str) -> (Vec<Sentence>, Vec
         .into_iter()
         .unzip();
 
+    println!("Time to tokenize {:?}", time.elapsed());
+    let time = std::time::Instant::now();
     let sentences: Vec<Sentence> = tokens.into_iter().map(Sentence::from_str).collect();
+    println!("Time to convert to sentence {:?}", time.elapsed());
     (sentences, counts)
 }
 
@@ -424,12 +424,8 @@ mod tests {
     fn test_all() {
         let text: &str = "\tYou hear £ £ £ here";
         let pattern = r"([^\s]+)|(\s+)";
-        use fancy_regex::Regex;
-        use std::sync::Arc;
-
-        let compiled_regex = Arc::new(Regex::new(pattern).expect("Invalid regex pattern"));
-
-        let pretokenized_sentences = crate::pretokenize(text, compiled_regex);
+        let compiled_regex = fancy_regex::Regex::new(pattern).expect("Invalid regex pattern");
+        let pretokenized_sentences = crate::pretokenize(text, &compiled_regex);
         println!("{:?}", pretokenized_sentences);
 
         let text_2: &str = "You hear £ £ £ here";
