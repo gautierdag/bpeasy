@@ -144,7 +144,6 @@ fn pretokenize<'a>(text: &'a str, regex: &Regex) -> Vec<&'a str> {
 
 fn pretokenize_strings(strings: Vec<&str>, pattern: &str) -> (Vec<Sentence>, Vec<u64>) {
     let regex = Regex::new(pattern).expect("Invalid regex pattern");
-    let time = std::time::Instant::now();
     let (tokens, counts): (Vec<&str>, Vec<u64>) = strings
         .par_iter()
         .filter(|text| !text.is_empty())
@@ -167,11 +166,8 @@ fn pretokenize_strings(strings: Vec<&str>, pattern: &str) -> (Vec<Sentence>, Vec
         )
         .into_iter()
         .unzip();
-
-    println!("Time to tokenize {:?}", time.elapsed());
-    let time = std::time::Instant::now();
+ 
     let sentences: Vec<Sentence> = tokens.into_iter().map(Sentence::from_str).collect();
-    println!("Time to convert to sentence {:?}", time.elapsed());
     (sentences, counts)
 }
 
@@ -190,7 +186,7 @@ fn get_most_frequent_pair(
     base_counts: &[u64],
 ) -> (HashMap<Pair, i64>, HashMap<Pair, HashSet<usize>>) {
     // Calculate frequencies for each pair of bytes in all sentences and words
-    return tokenized_sentences
+    tokenized_sentences
         .par_iter()
         .enumerate()
         .map(|(i, sentence)| {
@@ -199,6 +195,7 @@ fn get_most_frequent_pair(
 
             for window in sentence.get_symbols().windows(2) {
                 let current_pair: Pair = (window[0], window[1]);
+                // First update counts
                 local_pair_counts
                     .entry(current_pair)
                     .and_modify(|c| *c += base_counts[i] as i64)
@@ -236,7 +233,7 @@ fn get_most_frequent_pair(
                 }
                 (global_pair_counts, global_pair_positions)
             },
-        );
+        )
 }
 
 // Build vocab from most frequent pairs
@@ -246,13 +243,11 @@ fn build_bpe_vocab(
     max_token_length: usize,
     vocab_size: usize,
 ) -> HashMap<Vec<u8>, u32> {
-    let time = std::time::Instant::now();
     let (mut word_to_id, mut id_to_word) = initialize_vocab_bytes(vocab_size);
 
+    // get most frequent pair
     let (mut global_pair_counts, mut global_pair_positions) =
         get_most_frequent_pair(&tokenized_sentences, &base_counts);
-
-    println!("Time to get most frequent pair: {:?}", time.elapsed());
 
     // build Priority Queue from counts and positions
     let mut queue: BinaryHeap<Merge> = BinaryHeap::new();
@@ -353,11 +348,6 @@ fn train_bpe(
 ) -> PyResult<PyObject> {
     let regex = python_regex.to_str()?;
 
-    println!("STARTING BPEasy training");
-    let num_threads = rayon::current_num_threads();
-    println!("Number of threads: {}", num_threads);
-
-    let time = std::time::Instant::now();
     // validate inputs
     if max_token_length < 2 {
         return Err(exceptions::PyValueError::new_err(
@@ -383,17 +373,10 @@ fn train_bpe(
             })
         })
         .collect();
-    println!("Time to get strings {:?}", time.elapsed());
-    println!("Number of strings: {}", strings.len());
+
     let (pretokenized_sentences, counts): (Vec<Sentence>, Vec<u64>) =
         pretokenize_strings(strings, regex);
-    println!(
-        "Number of pretokenized_sentences: {}",
-        pretokenized_sentences.len()
-    );
-    println!("Time to get pretokenize {:?}", time.elapsed());
 
-    println!("Done tokenizing");
     let bpe_vocab = build_bpe_vocab(
         pretokenized_sentences,
         &counts,
