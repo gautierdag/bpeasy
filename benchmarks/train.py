@@ -19,32 +19,19 @@ logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
 
 @dataclasses.dataclass
 class TrainBPETokenizerArgs:
-    english_datasets: str = (
-        "/Users/gautier/Github/tokenizer-benchmarks/data/english/test"
-    )
-    code_datasets: str = "/Users/gautier/Github/tokenizer-benchmarks/data/code/test"
-    multilingual_datasets: str = (
-        "/Users/gautier/Github/tokenizer-benchmarks/data/multilingual/test"
-    )
+    datasets: str = "./benchmarks/data"
 
     num_characters: int = 1000
     vocab_size: int = 1024
     max_sentencepiece_length: int = 32
     normalization_rule_name: str = "gpt"
-    code_percentage: float = 0.4
-    multilingual_percentage: float = 0.3
 
     def __post_init__(self):
-        datasets = (
-            self.english_datasets.split(",")
-            + self.code_datasets.split(",")
-            + self.multilingual_datasets.split(",")
-        )
+        datasets = self.datasets.split(",")
         for ckpt in datasets:
             checkpoint_dir = Path(ckpt)
             assert checkpoint_dir.is_dir(), checkpoint_dir
 
-        assert self.code_percentage + self.multilingual_percentage <= 1
         assert self.normalization_rule_name in [
             "gpt",
             "gpt-num2",
@@ -103,24 +90,9 @@ def jsonl_content_iterator(
 
 def mix_jsonl_content_iterator(args: TrainBPETokenizerArgs):
     datasets = []
-    code_datasets = args.code_datasets.split(",")
-    mp_datasets = args.multilingual_datasets.split(",")
-    en_datasets = args.english_datasets.split(",")
-    for dataset in code_datasets:
-        if args.code_percentage > 0:
-            datasets.append((dataset, args.code_percentage / len(code_datasets)))
-    for dataset in mp_datasets:
-        if args.multilingual_percentage > 0:
-            datasets.append((dataset, args.multilingual_percentage / len(mp_datasets)))
-    for dataset in en_datasets:
-        if (1 - args.code_percentage - args.multilingual_percentage) > 0:
-            datasets.append(
-                (
-                    dataset,
-                    (1 - args.code_percentage - args.multilingual_percentage)
-                    / len(en_datasets),
-                )
-            )
+    num_datasets = len(args.datasets.split(","))
+    for dataset in args.datasets.split(","):
+        datasets.append((dataset, args.code_percentage / num_datasets))
 
     # Create iterators
     iterators = []

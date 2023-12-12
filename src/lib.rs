@@ -5,6 +5,7 @@ use pyo3::types::{PyBytes, PyDict, PyIterator, PyString};
 use rayon::prelude::*;
 use std::cmp::Ordering;
 use std::collections::{BinaryHeap, HashMap, HashSet};
+use std::sync::Arc;
 
 type Pair = (u32, u32);
 
@@ -122,30 +123,56 @@ impl Sentence {
     fn get_symbols(&self) -> Vec<u32> {
         self.symbols.iter().map(|s| s.c).collect()
     }
+
+    fn from_str(s: String) -> Self {
+        let mut sentence = Sentence::new();
+        for byte in s.bytes() {
+            sentence.add(byte as u32, 1);
+        }
+        sentence
+    }
 }
 
-fn pretokenize(text: &str, pattern: &str) -> Vec<Sentence> {
-    let regex = Regex::new(pattern);
-
-    let mut pretokenized_sentences: Vec<Sentence> = Vec::new();
-
-    for match_result in regex.expect(pattern).find_iter(text) {
-        match match_result {
-            Ok(token) => {
-                let mut sentence: Sentence = Sentence::new();
-                for byte in token.as_str().bytes() {
-                    // tokenized_byte.push(byte as u32);
-                    sentence.add(byte as u32, 1);
-                }
-                pretokenized_sentences.push(sentence);
-            }
+fn pretokenize(text: &str, regex: Arc<Regex>) -> Vec<String> {
+    regex
+        .find_iter(text)
+        .map(|mat| match mat {
+            Ok(token) => token.as_str().to_string(),
             Err(e) => {
                 println!("Error: {:?}", e);
-                break;
+                "".to_string()
             }
-        }
-    }
-    pretokenized_sentences
+        })
+        .collect()
+}
+
+fn pretokenize_strings(strings: Vec<&str>, pattern: &str) -> (Vec<Sentence>, Vec<u64>) {
+    let regex = Arc::new(Regex::new(pattern).expect("Invalid regex pattern"));
+    let (tokens, counts): (Vec<String>, Vec<u64>) = strings
+        .par_iter()
+        .filter(|text| !text.is_empty())
+        .flat_map(|&text| pretokenize(text, Arc::clone(&regex)))
+        .fold(
+            || HashMap::new(),
+            |mut acc, token| {
+                *acc.entry(token).or_insert(0) += 1;
+                acc
+            },
+        )
+        .reduce(
+            || HashMap::new(),
+            |mut a, b| {
+                for (token, count) in b {
+                    *a.entry(token).or_insert(0) += count;
+                }
+                a
+            },
+        )
+        .into_iter()
+        .unzip();
+
+    let sentences: Vec<Sentence> = tokens.into_iter().map(Sentence::from_str).collect();
+    (sentences, counts)
 }
 
 fn initialize_vocab_bytes(vocab_size: usize) -> (HashMap<Vec<u8>, u32>, Vec<Vec<u8>>) {
@@ -159,7 +186,8 @@ fn initialize_vocab_bytes(vocab_size: usize) -> (HashMap<Vec<u8>, u32>, Vec<Vec<
 }
 
 fn get_most_frequent_pair(
-    tokenized_sentences: &Vec<Sentence>,
+    tokenized_sentences: &[Sentence],
+    base_counts: &[u64],
 ) -> (HashMap<Pair, i64>, HashMap<Pair, HashSet<usize>>) {
     // Calculate frequencies for each pair of bytes in all sentences and words
     return tokenized_sentences
@@ -167,14 +195,13 @@ fn get_most_frequent_pair(
         .enumerate()
         .map(|(i, sentence)| {
             let mut local_pair_counts = HashMap::new();
-            let mut local_pair_positions = HashMap::new();
-            for word in sentence.get_symbols().windows(2) {
-                let current_pair: Pair = (word[0], word[1]);
+            let mut local_pair_positions: HashMap<Pair, HashSet<usize>> = HashMap::new();
 
-                // Initialize pair_counts for this pair if we just saw it for the first time
+            for window in sentence.get_symbols().windows(2) {
+                let current_pair: Pair = (window[0], window[1]);
                 local_pair_counts
                     .entry(current_pair)
-                    .and_modify(|c| *c += 1)
+                    .and_modify(|c| *c += base_counts[i] as i64)
                     .or_insert(1);
 
                 // Then update position
@@ -215,12 +242,17 @@ fn get_most_frequent_pair(
 // Build vocab from most frequent pairs
 fn build_bpe_vocab(
     tokenized_sentences: Vec<Sentence>,
+    base_counts: &[u64],
     max_token_length: usize,
     vocab_size: usize,
 ) -> HashMap<Vec<u8>, u32> {
+    let time = std::time::Instant::now();
     let (mut word_to_id, mut id_to_word) = initialize_vocab_bytes(vocab_size);
+
     let (mut global_pair_counts, mut global_pair_positions) =
-        get_most_frequent_pair(&tokenized_sentences);
+        get_most_frequent_pair(&tokenized_sentences, &base_counts);
+
+    println!("Time to get most frequent pair: {:?}", time.elapsed());
 
     // build Priority Queue from counts and positions
     let mut queue: BinaryHeap<Merge> = BinaryHeap::new();
@@ -279,11 +311,13 @@ fn build_bpe_vocab(
             .collect::<Vec<_>>();
 
         for ((pair, change), iw) in changes {
+            // adjust count to reflect sentence level count
+            let count = change * base_counts[iw] as i64;
             global_pair_counts
                 .entry(pair)
-                .and_modify(|c| *c += change)
-                .or_insert(change);
-            if change > 0 {
+                .and_modify(|c| *c += count)
+                .or_insert(count);
+            if count > 0 {
                 global_pair_positions
                     .entry(pair)
                     .and_modify(|h| {
@@ -323,6 +357,7 @@ fn train_bpe(
     let num_threads = rayon::current_num_threads();
     println!("Number of threads: {}", num_threads);
 
+    let time = std::time::Instant::now();
     // validate inputs
     if max_token_length < 2 {
         return Err(exceptions::PyValueError::new_err(
@@ -348,21 +383,23 @@ fn train_bpe(
             })
         })
         .collect();
-
-    let pretokenized_sentences: Vec<Sentence> = strings
-        .par_iter()
-        .filter(|text| !text.is_empty()) // Filter out empty strings
-        .map(|text| pretokenize(text, &regex)) // Tokenize non-empty strings
-        .reduce(
-            || Vec::new(),
-            |mut acc, sentences| {
-                acc.extend(sentences);
-                acc
-            },
-        );
+    println!("Time to get strings {:?}", time.elapsed());
+    println!("Number of strings: {}", strings.len());
+    let (pretokenized_sentences, counts): (Vec<Sentence>, Vec<u64>) =
+        pretokenize_strings(strings, regex);
+    println!(
+        "Number of pretokenized_sentences: {}",
+        pretokenized_sentences.len()
+    );
+    println!("Time to get pretokenize {:?}", time.elapsed());
 
     println!("Done tokenizing");
-    let bpe_vocab = build_bpe_vocab(pretokenized_sentences, max_token_length, vocab_size);
+    let bpe_vocab = build_bpe_vocab(
+        pretokenized_sentences,
+        &counts,
+        max_token_length,
+        vocab_size,
+    );
     let python_dict_out = PyDict::new(py);
     // convert bpe_vocab to python dict
     for (key, value) in bpe_vocab {
@@ -386,13 +423,28 @@ mod tests {
     #[test]
     fn test_all() {
         let text: &str = "\tYou hear £ £ £ here";
-        let regex = r"([^\s]+)|(\s+)";
-        let pretokenized_sentences = crate::pretokenize(text, regex);
+        let pattern = r"([^\s]+)|(\s+)";
+        use fancy_regex::Regex;
+        use std::sync::Arc;
+
+        let compiled_regex = Arc::new(Regex::new(pattern).expect("Invalid regex pattern"));
+
+        let pretokenized_sentences = crate::pretokenize(text, compiled_regex);
         println!("{:?}", pretokenized_sentences);
+
+        let text_2: &str = "You hear £ £ £ here";
+
+        let (pretokenized_sentences, _counts) =
+            crate::pretokenize_strings(vec![text, text_2], pattern);
 
         let vocab_size = 300;
         let max_token_length = 128;
-        crate::build_bpe_vocab(pretokenized_sentences, max_token_length, vocab_size);
+        crate::build_bpe_vocab(
+            pretokenized_sentences,
+            &_counts,
+            max_token_length,
+            vocab_size,
+        );
     }
 
     #[test]

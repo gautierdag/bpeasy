@@ -209,12 +209,16 @@ def train(args: TrainBPETokenizerArgs):
     iterator = mix_jsonl_content_iterator(args)
     # training the tokenizer
     regex = get_regex_from_normalization_rule_name(args.normalization_rule_name)
+    import time
+    time_now = time.time()
     vocab = bpeasy.train_bpe(
         iterator,
         regex,
         args.max_sentencepiece_length,
         args.vocab_size,
     )
+    logging.info(f"Training took {time.time() - time_now} seconds")
+
     name = generate_model_name(asdict(args))
 
     bpeasy.save_vocab_to_tiktoken(
