@@ -6,7 +6,6 @@ __all__ = [
 ]
 
 
-
 def save_vocab_to_tiktoken(
     vocab: dict[bytes, int],
     out_path: str,

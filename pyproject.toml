@@ -12,5 +12,9 @@ classifiers = [
 ]
 dynamic = ["version"]
 
+[project.optional-dependencies]
+dev = ["pytest"]
+bench = ["tokenizers", "tqdm"]
+
 [tool.maturin]
 features = ["pyo3/extension-module"]

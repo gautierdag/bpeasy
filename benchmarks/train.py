@@ -1,36 +1,46 @@
-import json
-import pytest
-import logging
-import sys
-import itertools
-import glob
 import dataclasses
+import glob
+import json
+import logging
+import os
+import sys
+import time
+from contextlib import contextmanager
 from pathlib import Path
 
 import tokenizers
 from tokenizers import Regex, Tokenizer, decoders, pre_tokenizers
 from tokenizers.models import BPE
 from tokenizers.trainers import BpeTrainer
+from tqdm import tqdm
 
 import bpeasy
 
 logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
 
 
+@contextmanager
+def suppress_stdout():
+    with open(os.devnull, "w") as devnull:
+        old_stdout = sys.stdout
+        sys.stdout = devnull
+        try:
+            yield
+        finally:
+            sys.stdout = old_stdout
+
+
 @dataclasses.dataclass
 class TrainBPETokenizerArgs:
-    datasets: str = "./benchmarks/data"
+    dataset: str = "./benchmarks/data"
 
-    num_characters: int = 1000
-    vocab_size: int = 1024
-    max_sentencepiece_length: int = 32
+    vocab_size: int = 32_000
+    max_sentencepiece_length: int = 64
     normalization_rule_name: str = "gpt"
 
     def __post_init__(self):
-        datasets = self.datasets.split(",")
-        for ckpt in datasets:
-            checkpoint_dir = Path(ckpt)
-            assert checkpoint_dir.is_dir(), checkpoint_dir
+        checkpoint_dir = Path(self.dataset)
+        assert checkpoint_dir.is_dir(), checkpoint_dir
 
         assert self.normalization_rule_name in [
             "gpt",
@@ -56,8 +66,7 @@ def get_content_key(path: str) -> str:
 
 
 def jsonl_content_iterator(
-    file_path: str,
-    character_limit=2_000_000,
+    args: TrainBPETokenizerArgs,
 ):
     """
     Iterates over a jsonl file and yields the content of each line
@@ -65,18 +74,15 @@ def jsonl_content_iterator(
     This is ripe for optimisation if you want to mess with more fine-grained
     character limits (eg. more Python than Java)
     """
-    logging.info(f"Creating iterator for {character_limit} characters in {file_path}")
+    file_path = args.dataset
     chunk_num, character_count = 0, 0
     chunks = glob.glob(f"{file_path}/*.jsonl")
-    logging.info(f"Found {len(chunks)} chunks")
 
-    while character_count < character_limit and chunk_num < len(chunks):
+    while chunk_num < len(chunks):
         file_name = chunks[chunk_num]
         content_key = get_content_key(file_name)
         with open(file_name, "r", encoding="utf-8") as f:
             for line in f:
-                if character_count >= character_limit:  # stop after limit
-                    break
                 try:
                     obj = json.loads(line)
                     text = obj[content_key]
@@ -86,28 +92,6 @@ def jsonl_content_iterator(
                 character_count += text_character_count
                 yield text
         chunk_num += 1
-
-
-def mix_jsonl_content_iterator(args: TrainBPETokenizerArgs):
-    datasets = []
-    num_datasets = len(args.datasets.split(","))
-    for dataset in args.datasets.split(","):
-        datasets.append((dataset, args.code_percentage / num_datasets))
-
-    # Create iterators
-    iterators = []
-    total_weight = sum([t[1] for t in datasets])
-    for file_path, percentage in datasets:
-        effective_limit = int((percentage / total_weight) * args.num_characters)
-        assert effective_limit > 0
-        it = jsonl_content_iterator(
-            file_path,
-            effective_limit,
-        )
-        iterators.append(it)
-
-    # Chain iterators together
-    return itertools.chain(*iterators)
 
 
 def get_regex_from_normalization_rule_name(normalization_rule_name: str) -> str:
@@ -127,20 +111,15 @@ def get_regex_from_normalization_rule_name(normalization_rule_name: str) -> str:
         raise ValueError(f"Unknown normalization_rule_name {normalization_rule_name}")
 
 
-@pytest.fixture(scope="session")
-def args() -> str:
-    return TrainBPETokenizerArgs()
-
-
-def test_train_huggingface(benchmark, args: TrainBPETokenizerArgs):
+def train_huggingface(args: TrainBPETokenizerArgs):
     # should be at least 0.14.0 to train with char limit
     assert tokenizers.__version__ >= "0.14.0"
     tokenizer = Tokenizer(BPE(byte_fallback=True))
     trainer = BpeTrainer(
         vocab_size=args.vocab_size,
-        show_progress=True,
         special_tokens=[f"<0x{i:02X}>" for i in range(256)],  # seed sm vocab
         max_token_length=args.max_sentencepiece_length,
+        show_progress=False,
     )
     regex_expression = get_regex_from_normalization_rule_name(
         args.normalization_rule_name
@@ -160,24 +139,47 @@ def test_train_huggingface(benchmark, args: TrainBPETokenizerArgs):
     tokenizer.decoder = decoders.Sequence(
         [decoders.ByteLevel(), decoders.ByteFallback()]
     )
-    iterator = mix_jsonl_content_iterator(args)
+    iterator = jsonl_content_iterator(args)
     # training the tokenizer
-    benchmark(
-        tokenizer.train_from_iterator,
-        iterator,
-        trainer,
-    )
+    with suppress_stdout():
+        tokenizer.train_from_iterator(iterator, trainer)
 
 
-def test_train_bpeasy(benchmark, args: TrainBPETokenizerArgs):
+def train_bpeasy(args: TrainBPETokenizerArgs):
     # Use ByteLevel Decoder
-    iterator = mix_jsonl_content_iterator(args)
+    iterator = jsonl_content_iterator(args)
     # training the tokenizer
     regex = get_regex_from_normalization_rule_name(args.normalization_rule_name)
-    benchmark(
-        bpeasy.train_bpe,
+
+    bpeasy.train_bpe(
         iterator,
         regex,
         args.max_sentencepiece_length,
         args.vocab_size,
     )
+
+
+if __name__ == "__main__":
+    NUM_ITERATIONS = 100
+    args = TrainBPETokenizerArgs()
+
+    times_huggingface = []
+    times_bpeasy = []
+    for i in tqdm(range(NUM_ITERATIONS)):
+        time_now = time.time()
+        train_huggingface(args)
+        times_huggingface.append(time.time() - time_now)
+
+        time_now = time.time()
+        train_bpeasy(args)
+        times_bpeasy.append(time.time() - time_now)
+
+    avg_time_huggingface = sum(times_huggingface) / len(times_huggingface)
+    avg_time_bpeasy = sum(times_bpeasy) / len(times_bpeasy)
+    std_dev_huggingface = sum(
+        [(t - avg_time_huggingface) ** 2 for t in times_huggingface]
+    )
+    std_dev_bpeasy = sum([(t - avg_time_bpeasy) ** 2 for t in times_bpeasy])
+
+    print(f"huggingface {avg_time_huggingface} +/- {std_dev_huggingface}")
+    print(f"bpeasy {avg_time_bpeasy} +/- {std_dev_bpeasy}")

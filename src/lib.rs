@@ -143,10 +143,9 @@ fn pretokenize<'a>(text: &'a str, regex: &Regex) -> Vec<&'a str> {
 }
 
 fn pretokenize_strings(strings: Vec<&str>, pattern: &str) -> (Vec<Sentence>, Vec<u64>) {
-    let regex = Regex::new(pattern).expect("Invalid regex pattern");
+    let regex: Regex = Regex::new(pattern).expect("Invalid regex pattern");
     let (tokens, counts): (Vec<&str>, Vec<u64>) = strings
         .par_iter()
-        .filter(|text| !text.is_empty())
         .flat_map(|&text| pretokenize(text, &regex))
         .fold(
             || HashMap::new(),
@@ -166,7 +165,7 @@ fn pretokenize_strings(strings: Vec<&str>, pattern: &str) -> (Vec<Sentence>, Vec
         )
         .into_iter()
         .unzip();
- 
+
     let sentences: Vec<Sentence> = tokens.into_iter().map(Sentence::from_str).collect();
     (sentences, counts)
 }
@@ -372,6 +371,7 @@ fn train_bpe(
                     .and_then(|py_string| py_string.to_str().ok())
             })
         })
+        .filter(|text| !text.is_empty())
         .collect();
 
     let (pretokenized_sentences, counts): (Vec<Sentence>, Vec<u64>) =
