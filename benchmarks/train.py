@@ -15,6 +15,7 @@ from tokenizers.trainers import BpeTrainer
 from tqdm import tqdm
 
 import bpeasy
+from bpeasy.tokenizer import BPEasyTokenizer
 
 logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
 
@@ -144,6 +145,8 @@ def train_huggingface(args: TrainBPETokenizerArgs):
     with suppress_stdout():
         tokenizer.train_from_iterator(iterator, trainer)
 
+    return tokenizer
+
 
 def train_bpeasy(args: TrainBPETokenizerArgs):
     # Use ByteLevel Decoder
@@ -151,35 +154,66 @@ def train_bpeasy(args: TrainBPETokenizerArgs):
     # training the tokenizer
     regex = get_regex_from_normalization_rule_name(args.normalization_rule_name)
 
-    bpeasy.train_bpe(
+    vocab = bpeasy.train_bpe(
         iterator,
         regex,
         args.max_sentencepiece_length,
         args.vocab_size,
     )
 
+    return BPEasyTokenizer(
+        vocab,
+        regex,
+        special_tokens=[],
+        fill_to_nearest_multiple_of_eight=False,
+    )
+
+
+def encode(tokenizer, text: str):
+    iterator = jsonl_content_iterator(args)
+    for text in iterator:
+        tokenizer.encode(text)
+
+
+def get_mean_std_dev(times: list[float]) -> tuple[float, float]:
+    avg_time = sum(times) / len(times)
+    std_dev = sum([(t - avg_time) ** 2 for t in times])
+    return avg_time, std_dev
+
 
 if __name__ == "__main__":
-    NUM_ITERATIONS = 100
+    NUM_ITERATIONS = 25
     args = TrainBPETokenizerArgs()
 
-    times_huggingface = []
-    times_bpeasy = []
+    times_train_huggingface = []
+    times_encode_huggingface = []
+    times_train_bpeasy = []
+    times_encode_bpeasy = []
     for i in tqdm(range(NUM_ITERATIONS)):
         time_now = time.time()
-        train_huggingface(args)
-        times_huggingface.append(time.time() - time_now)
+        tokenizer = train_huggingface(args)
+        times_train_huggingface.append(time.time() - time_now)
 
         time_now = time.time()
-        train_bpeasy(args)
-        times_bpeasy.append(time.time() - time_now)
+        encode(tokenizer, args)
+        times_encode_huggingface.append(time.time() - time_now)
 
-    avg_time_huggingface = sum(times_huggingface) / len(times_huggingface)
-    avg_time_bpeasy = sum(times_bpeasy) / len(times_bpeasy)
-    std_dev_huggingface = sum(
-        [(t - avg_time_huggingface) ** 2 for t in times_huggingface]
-    )
-    std_dev_bpeasy = sum([(t - avg_time_bpeasy) ** 2 for t in times_bpeasy])
+        time_now = time.time()
+        tokenizer = train_bpeasy(args)
+        times_train_bpeasy.append(time.time() - time_now)
 
-    print(f"huggingface {avg_time_huggingface} +/- {std_dev_huggingface}")
-    print(f"bpeasy {avg_time_bpeasy} +/- {std_dev_bpeasy}")
+        time_now = time.time()
+        encode(tokenizer, args)
+        times_encode_bpeasy.append(time.time() - time_now)
+
+    m_hf, std_hf = get_mean_std_dev(times_train_huggingface)
+    m_bpeasy, std_bpeasy = get_mean_std_dev(times_train_bpeasy)
+
+    print(f"huggingface train time {m_hf} +/- {std_hf}")
+    print(f"bpeasy train time {m_bpeasy} +/- {std_bpeasy}")
+
+    m_hf, std_hf = get_mean_std_dev(times_encode_huggingface)
+    m_bpeasy, std_bpeasy = get_mean_std_dev(times_encode_bpeasy)
+
+    print(f"huggingface encode time {m_hf} +/- {std_hf}")
+    print(f"bpeasy encode time {m_bpeasy} +/- {std_bpeasy}")

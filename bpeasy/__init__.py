@@ -13,7 +13,8 @@ def save_vocab_to_tiktoken(
     fill_to_nearest_multiple_of_eight: bool = False,
 ) -> None:
     """
-    Export vocab to tiktoken txt format.
+    Export vocab to tiktoken txt format - use this if you want to use tiktoken library directly
+    Note: you will need to handle special tokens and regex yourself
     """
     import base64
 
