@@ -1,6 +1,6 @@
 import json
 import base64
-from typing import Any
+
 import tiktoken
 
 from .convert import convert_tiktoken_to_huggingface

@@ -10,7 +10,7 @@
 
 ## Overview
 
-`bpeasy` is a Python package that provides a tokenizer trainer, implementing in 300 lines of rust an efficient version of Byte Pair Encoding (BPE). The implementation largely follows the huggingface `tokenizers` library, but makes opionated decisions to simplify the tokenizer training specifically to:
+`bpeasy` is a Python package that provides a tokenizer trainer, implementing in 400 lines of rust an efficient version of Byte Pair Encoding (BPE). The implementation largely follows the huggingface `tokenizers` library, but makes opinionated decisions to simplify the tokenizer training specifically to:
 
 1. Treat text data at the byte-level first --- all text is converted to bytes before training rather than using a character-level approach (like in Huggingface).
 2. Always use a regex-based split pre-tokenizer. This is a customisable regex that is applied to the text before training. This regex decides where to split the text and limits what kind of tokens are possible. This is technically possible in Huggingface but is not well documented. We also use the `fancy-regex` crate which supports a richer set of regex features than the `regex` crate used in Huggingface.
@@ -28,7 +28,7 @@ pip install bpeasy
 
 ## Training
 
-The training function is barebones and returns the trained tokenizer vocab as a dictionary of bytes to integers. This is to allow for maximum flexibility in how you want to use the tokenizer. For example, you can use then port these to tiktoken or Huggingface tokenizers (see below).
+The training function is designed to be bare-bones and returns the trained tokenizer vocab as a dictionary of bytes to integers. This is to allow for maximum flexibility in how you want to use the tokenizer. For example, you can use then port these to tiktoken or Huggingface tokenizers (see below).
 
 ```python
 # should be an iterator over str
@@ -70,7 +70,7 @@ decoded = tokenizer.decode(encoded)
 > "hello_world"
 ```
 
-You can also use `tiktoken`` directly, but you would need to handle the special tokens and regex pattern yourself:
+You can also use `tiktoken` directly, but you would need to handle the special tokens and regex pattern yourself:
 
 ```python
 import tiktoken
@@ -136,7 +136,7 @@ save_vocab_to_tiktoken(vocab, "vocab.txt", special_tokens=["<s>", "<pad>", "</s>
 
 ```
 
-If you want to use the `tiktoken`` txt format, you will still need to handle the regex and special tokens yourself, as shown above,
+If you want to use the `tiktoken` txt format, you will still need to handle the regex and special tokens yourself, as shown above,
 
 ## Contributing
 
