@@ -13,8 +13,7 @@ classifiers = [
 dynamic = ["version"]
 
 [project.optional-dependencies]
-dev = ["pytest"]
-bench = ["tokenizers", "tqdm"]
+dev = ["pytest", "pytest-cov", "black", "tokenizers", "tqdm"]
 
 [tool.maturin]
 features = ["pyo3/extension-module"]

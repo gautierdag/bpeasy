@@ -1,5 +1,6 @@
 import json
 import base64
+from typing import Any
 import tiktoken
 
 from .convert import convert_tiktoken_to_huggingface
@@ -90,3 +91,6 @@ class BPEasyTokenizer:
 
     def export_to_huggingface_format(self, out_path: str) -> None:
         convert_tiktoken_to_huggingface(self._encoder, out_path, self.regex_pattern)
+
+    def __len__(self) -> int:
+        return len(self.vocab)

@@ -2,10 +2,8 @@ import dataclasses
 import glob
 import json
 import logging
-import os
 import sys
 import time
-from contextlib import contextmanager
 from pathlib import Path
 
 import tokenizers
@@ -20,50 +18,16 @@ from bpeasy.tokenizer import BPEasyTokenizer
 logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
 
 
-@contextmanager
-def suppress_stdout():
-    with open(os.devnull, "w") as devnull:
-        old_stdout = sys.stdout
-        sys.stdout = devnull
-        try:
-            yield
-        finally:
-            sys.stdout = old_stdout
-
-
 @dataclasses.dataclass
 class TrainBPETokenizerArgs:
     dataset: str = "./benchmarks/data"
-
     vocab_size: int = 32_000
-    max_sentencepiece_length: int = 64
-    normalization_rule_name: str = "gpt"
+    max_sentencepiece_length: int = 128
+    regex_pattern: str = r"""(?i:'s|'t|'re|'ve|'m|'ll|'d)|[^\r\n\p{L}\p{N}]?\p{L}+|\p{N}{1,3}| ?[^\s\p{L}\p{N}]+[\r\n]*|\s*[\r\n]+|\s+(?!\S)|\s+"""
 
     def __post_init__(self):
         checkpoint_dir = Path(self.dataset)
         assert checkpoint_dir.is_dir(), checkpoint_dir
-
-        assert self.normalization_rule_name in [
-            "gpt",
-            "gpt-num2",
-            "punct",
-            "punct-num2",
-            "identity",
-        ]
-
-
-def get_content_key(path: str) -> str:
-    with open(path, "r", encoding="utf-8") as f:
-        line = f.readline().rstrip()
-        try:
-            x = json.loads(line)
-        except UnicodeDecodeError as e:
-            logging.info(f"Error when trying to decode '{line}': {str(e)}")
-            raise
-        for k in ["text", "content"]:
-            if k in x:
-                return k
-        raise RuntimeError(f"Unable to determine key for {path}")
 
 
 def jsonl_content_iterator(
@@ -81,35 +45,14 @@ def jsonl_content_iterator(
 
     while chunk_num < len(chunks):
         file_name = chunks[chunk_num]
-        content_key = get_content_key(file_name)
         with open(file_name, "r", encoding="utf-8") as f:
             for line in f:
-                try:
-                    obj = json.loads(line)
-                    text = obj[content_key]
-                except:
-                    continue
+                obj = json.loads(line)
+                text = obj["text"]
                 text_character_count = len(text)
                 character_count += text_character_count
                 yield text
         chunk_num += 1
-
-
-def get_regex_from_normalization_rule_name(normalization_rule_name: str) -> str:
-    # GPT4 regex
-    if normalization_rule_name == "gpt":
-        return r"""(?i:'s|'t|'re|'ve|'m|'ll|'d)|[^\r\n\p{L}\p{N}]?\p{L}+|\p{N}{1,3}| ?[^\s\p{L}\p{N}]+[\r\n]*|\s*[\r\n]+|\s+(?!\S)|\s+"""
-    # limits to 2 digits (use for vocab size < 50k)
-    elif normalization_rule_name == "gpt-num2":
-        return r"""(?i:'s|'t|'re|'ve|'m|'ll|'d)|[^\r\n\p{L}\p{N}]?\p{L}+|\p{N}{1,2}| ?[^\s\p{L}\p{N}]+[\r\n]*|\s*[\r\n]+|\s+(?!\S)|\s+"""
-    # separates punctuation from words (except spaces)
-    elif normalization_rule_name == "punct":
-        return r""" ?\p{L}+|\p{N}{1,3}| ?[^\s\p{L}\p{N}]+[\r\n]*|\s*[\r\n]+|\s+(?!\S)|\s+"""
-    # limits to 2 digits (use for vocab size < 50k)
-    elif normalization_rule_name == "punct-num2":
-        return r""" ?\p{L}+|\p{N}{1,2}| ?[^\s\p{L}\p{N}]+[\r\n]*|\s*[\r\n]+|\s+(?!\S)|\s+"""
-    else:
-        raise ValueError(f"Unknown normalization_rule_name {normalization_rule_name}")
 
 
 def train_huggingface(args: TrainBPETokenizerArgs):
@@ -122,10 +65,7 @@ def train_huggingface(args: TrainBPETokenizerArgs):
         max_token_length=args.max_sentencepiece_length,
         show_progress=False,
     )
-    regex_expression = get_regex_from_normalization_rule_name(
-        args.normalization_rule_name
-    )
-    gpt_regex = Regex(regex_expression)
+    gpt_regex = Regex(args.regex_pattern)
 
     split_pre_tokenizer = pre_tokenizers.Split(
         gpt_regex, behavior="isolated", invert=False
@@ -142,8 +82,7 @@ def train_huggingface(args: TrainBPETokenizerArgs):
     )
     iterator = jsonl_content_iterator(args)
     # training the tokenizer
-    with suppress_stdout():
-        tokenizer.train_from_iterator(iterator, trainer)
+    tokenizer.train_from_iterator(iterator, trainer)
 
     return tokenizer
 
@@ -152,27 +91,30 @@ def train_bpeasy(args: TrainBPETokenizerArgs):
     # Use ByteLevel Decoder
     iterator = jsonl_content_iterator(args)
     # training the tokenizer
-    regex = get_regex_from_normalization_rule_name(args.normalization_rule_name)
-
     vocab = bpeasy.train_bpe(
         iterator,
-        regex,
+        args.regex_pattern,
         args.max_sentencepiece_length,
         args.vocab_size,
     )
 
     return BPEasyTokenizer(
         vocab,
-        regex,
+        args.regex_pattern,
         special_tokens=[],
         fill_to_nearest_multiple_of_eight=False,
     )
 
 
-def encode(tokenizer, text: str):
+def encode(tokenizer, args) -> float:
     iterator = jsonl_content_iterator(args)
+    lengths = []
+    num_bytes = 0
     for text in iterator:
-        tokenizer.encode(text)
+        num_bytes += len(text.encode("utf-8"))
+        encoded = tokenizer.encode(text)
+        lengths.append(len(encoded))
+    return num_bytes / sum(lengths)
 
 
 def get_mean_std_dev(times: list[float]) -> tuple[float, float]:
@@ -182,20 +124,23 @@ def get_mean_std_dev(times: list[float]) -> tuple[float, float]:
 
 
 if __name__ == "__main__":
-    NUM_ITERATIONS = 25
     args = TrainBPETokenizerArgs()
 
     times_train_huggingface = []
     times_encode_huggingface = []
     times_train_bpeasy = []
     times_encode_bpeasy = []
-    for i in tqdm(range(NUM_ITERATIONS)):
+    byte_per_token_bpeasy = []
+
+    for v in tqdm(range(5000, 100_000, 5000)):
+        args.vocab_size = v
+
         time_now = time.time()
         tokenizer = train_huggingface(args)
         times_train_huggingface.append(time.time() - time_now)
 
         time_now = time.time()
-        encode(tokenizer, args)
+        byte_per_token_hf = encode(tokenizer, args)
         times_encode_huggingface.append(time.time() - time_now)
 
         time_now = time.time()
@@ -203,7 +148,7 @@ if __name__ == "__main__":
         times_train_bpeasy.append(time.time() - time_now)
 
         time_now = time.time()
-        encode(tokenizer, args)
+        byte_per_token_bpeasy.append(encode(tokenizer, args) / byte_per_token_hf)
         times_encode_bpeasy.append(time.time() - time_now)
 
     m_hf, std_hf = get_mean_std_dev(times_train_huggingface)
@@ -217,3 +162,6 @@ if __name__ == "__main__":
 
     print(f"huggingface encode time {m_hf} +/- {std_hf}")
     print(f"bpeasy encode time {m_bpeasy} +/- {std_bpeasy}")
+
+    m_bpeasy, std_bpeasy = get_mean_std_dev(byte_per_token_bpeasy)
+    print(f"bpeasy bytes/token vs hf: {m_bpeasy} +/- {std_bpeasy}")

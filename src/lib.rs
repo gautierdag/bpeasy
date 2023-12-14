@@ -198,7 +198,7 @@ fn get_most_frequent_pair(
                 local_pair_counts
                     .entry(current_pair)
                     .and_modify(|c| *c += base_counts[i] as i64)
-                    .or_insert(1);
+                    .or_insert(base_counts[i] as i64);
 
                 // Then update position
                 local_pair_positions
