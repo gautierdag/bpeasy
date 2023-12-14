@@ -10,11 +10,13 @@
 
 ## Overview
 
-`bpeasy` is a Python package that provides a tokenizer utility, implementing in 300 lines of rust an efficient version of Byte Pair Encoding (BPE). The main implementation largely follows the huggingface tokenizers library, but makes opionated decisions to simplify the tokenizer training specifically to:
+`bpeasy` is a Python package that provides a tokenizer trainer, implementing in 300 lines of rust an efficient version of Byte Pair Encoding (BPE). The implementation largely follows the huggingface `tokenizers` library, but makes opionated decisions to simplify the tokenizer training specifically to:
 
 1. Treat text data at the byte-level first --- all text is converted to bytes before training rather than using a character-level approach (like in Huggingface).
-2. Always use a regex-based pre-tokenizer. This is a customisable regex that is applied to the text before training. This regex decides where to split the text and limits what kind of tokens are possible. This is technically possible in Huggingface but is not well documented. We also use the `fancy-regex` crate which supports a richer set of regex features than the `regex` crate used in Huggingface.
-3. Uses `int64` types for counting to allow for training on much larger datasets without the risk of overflow.
+2. Always use a regex-based split pre-tokenizer. This is a customisable regex that is applied to the text before training. This regex decides where to split the text and limits what kind of tokens are possible. This is technically possible in Huggingface but is not well documented. We also use the `fancy-regex` crate which supports a richer set of regex features than the `regex` crate used in Huggingface.
+3. Use `int64` types for counting to allow for training on much larger datasets without the risk of overflow.
+
+You can think of `bpeasy` as the `tiktoken` training code that was never released.
 
 ## Installation
 
