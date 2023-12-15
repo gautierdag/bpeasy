@@ -9,8 +9,26 @@ classifiers = [
     "Programming Language :: Rust",
     "Programming Language :: Python :: Implementation :: CPython",
     "Programming Language :: Python :: Implementation :: PyPy",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
 ]
 dynamic = ["version"]
+description = "Fast bare-bones BPE for modern tokenizer training"
+authors = [{author = "Gautier Dagan", email = "<gautier.dagan@ed.ac.uk>"}]
+license = "MIT"
+readme = "README.md"
+homepage = "https://github.com/gautierdag/bpeasy"
+repository = "https://github.com/gautierdag/bpeasy"
+include = [
+    "LICENSE",
+]
+keywords = ["tokenizer", "tokenization", "bpe"]
+dependencies = [
+    "tiktoken>=0.4.0",
+]
 
 [project.optional-dependencies]
 dev = ["pytest", "pytest-cov", "black", "tokenizers", "tqdm"]
