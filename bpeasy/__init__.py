@@ -1,8 +1,14 @@
+from importlib.metadata import version
+
 from .bpeasy import train_bpe
+
+__version__ = version("bpeasy")
+
 
 __all__ = [
     "save_vocab_to_tiktoken",
     "train_bpe",
+    "__version__",
 ]
 
 
