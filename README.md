@@ -10,7 +10,9 @@
 2. Always use a regex-based split pre-tokenizer. This is a customisable regex that is applied to the text before training. This regex decides where to split the text and limits what kind of tokens are possible. This is technically possible in Huggingface but is not well documented. We also use the `fancy-regex` crate which supports a richer set of regex features than the `regex` crate used in Huggingface.
 3. Use `int64` types for counting to allow for training on much larger datasets without the risk of overflow.
 
-You can think of `bpeasy` as the `tiktoken` training code that was never released.
+**You can think of `bpeasy` as the `tiktoken` training code that was never was.**
+
+See the [benchmarks](/benchmarks/README.md) section for a comparison with the Huggingface library.
 
 ## Installation
 
@@ -36,6 +38,22 @@ vocab = bpeasy.train_bpe(
     regex_pattern,
     args.max_sentencepiece_length, # max length of tokens
     args.vocab_size, # max size of vocab
+)
+```
+
+Alternatively, you can also train using the basic tokenizer class provided:
+
+```python
+from bpeasy.tokenizer import BPEasyTokenizer
+
+tokenizer = BPEasyTokenizer.train(
+    iterator, # iterator over str
+    vocab_size=vocab_size,
+    max_token_length=max_token_length,
+    regex_pattern=regex_pattern,
+    special_tokens=["<s>", "<pad>", "</s>"],
+    fill_to_nearest_multiple_of_eight=True,
+    name="bpeasy",
 )
 ```
 
