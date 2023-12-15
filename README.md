@@ -1,12 +1,6 @@
 # bpeasy
 
-[![codecov](https://codecov.io/gh/gautierdag/bpeasy/branch/main/graph/badge.svg?token=NWHDJ22L8I)](https://codecov.io/gh/gautierdag/bpeasy)
-
-[![tests](https://github.com/gautierdag/bpeasy/actions/workflows/test.yml/badge.svg)](https://github.com/gautierdag/bpeasy/actions/workflows/test.yml)
-[![image](https://img.shields.io/pypi/v/bpeasy.svg)](https://pypi.python.org/pypi/bpeasy)
-[![image](https://img.shields.io/pypi/l/bpeasy.svg)](https://pypi.python.org/pypi/bpeasy)
-[![image](https://img.shields.io/pypi/pyversions/bpeasy.svg)](https://pypi.python.org/pypi/bpeasy)
-[![PyPI version](https://badge.fury.io/py/bpeasy.svg)](https://badge.fury.io/py/bpeasy)
+[![codecov](https://codecov.io/gh/gautierdag/bpeasy/branch/main/graph/badge.svg?token=NWHDJ22L8I)](https://codecov.io/gh/gautierdag/bpeasy) [![tests](https://github.com/gautierdag/bpeasy/actions/workflows/test.yml/badge.svg)](https://github.com/gautierdag/bpeasy/actions/workflows/test.yml) [![image](https://img.shields.io/pypi/l/bpeasy.svg)](https://pypi.python.org/pypi/bpeasy) [![image](https://img.shields.io/pypi/pyversions/bpeasy.svg)](https://pypi.python.org/pypi/bpeasy) [![PyPI version](https://badge.fury.io/py/bpeasy.svg)](https://badge.fury.io/py/bpeasy)
 
 ## Overview
 
