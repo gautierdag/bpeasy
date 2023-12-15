@@ -60,6 +60,8 @@ jobs:
           pytest tests --cov=foobar --cov-report xml
           cargo llvm-cov report --lcov --output-path coverage.lcov
       - uses: codecov/codecov-action@v3
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
         with:
           files: coverage.lcov,coverage.xml
           name: ${{ matrix.os }}
