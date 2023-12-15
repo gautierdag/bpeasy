@@ -9,9 +9,6 @@ on:
   push:
     branches:
       - main
-      - release
-    tags:
-      - "*"
   pull_request:
   workflow_dispatch:
 
@@ -57,7 +54,7 @@ jobs:
           cargo llvm-cov clean --workspace
           cargo test
           maturin develop
-          pytest tests --cov=foobar --cov-report xml
+          pytest tests --cov=bpeasy --cov-report xml
           cargo llvm-cov report --lcov --output-path coverage.lcov
       - uses: codecov/codecov-action@v3
         env:
