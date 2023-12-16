@@ -10,7 +10,7 @@
 2. Always use a regex-based split pre-tokenizer. This is a customisable regex that is applied to the text before training. This regex decides where to split the text and limits what kind of tokens are possible. This is technically possible in Huggingface but is not well documented. We also use the `fancy-regex` crate which supports a richer set of regex features than the `regex` crate used in Huggingface.
 3. Use `int64` types for counting to allow for training on much larger datasets without the risk of overflow.
 
-**You can think of `bpeasy` as the `tiktoken` training code that was never was.**
+**You can think of `bpeasy` as the `tiktoken` training code that never was.**
 
 See the [benchmarks](/benchmarks/README.md) section for a comparison with the Huggingface library.
 
