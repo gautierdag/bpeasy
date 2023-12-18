@@ -173,7 +173,7 @@ fn pretokenize_strings(strings: Vec<&str>, pattern: &str) -> (Vec<Sentence>, Vec
 fn initialize_vocab_bytes(vocab_size: usize) -> (HashMap<Vec<u8>, u32>, Vec<Vec<u8>>) {
     let mut word_to_id: HashMap<Vec<u8>, u32> = HashMap::with_capacity(vocab_size);
     let mut id_to_word: Vec<Vec<u8>> = Vec::with_capacity(vocab_size);
-    for i in 0..255 {
+    for i in 0..=255 {
         word_to_id.insert(vec![i], i as u32);
         id_to_word.push(vec![i]);
     }
@@ -429,6 +429,6 @@ mod tests {
     #[test]
     fn test_initialize_vocab_bytes() {
         let vocab = crate::initialize_vocab_bytes(400);
-        assert_eq!(vocab.0.len(), 255);
+        assert_eq!(vocab.0.len(), 256);
     }
 }
