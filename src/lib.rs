@@ -1,10 +1,12 @@
 use fancy_regex::Regex;
+use fxhash::FxHashMap as HashMap;
+use fxhash::FxHashSet as HashSet;
 use pyo3::exceptions;
 use pyo3::prelude::*;
 use pyo3::types::{PyBytes, PyDict, PyIterator, PyString};
 use rayon::prelude::*;
 use std::cmp::Ordering;
-use std::collections::{BinaryHeap, HashMap, HashSet};
+use std::collections::BinaryHeap;
 
 type Pair = (u32, u32);
 
@@ -148,14 +150,14 @@ fn pretokenize_strings(strings: Vec<&str>, pattern: &str) -> (Vec<Sentence>, Vec
         .par_iter()
         .flat_map(|&text| pretokenize(text, &regex))
         .fold(
-            || HashMap::new(),
+            || HashMap::<&str, u64>::default(),
             |mut acc, token| {
                 *acc.entry(token).or_insert(0) += 1;
                 acc
             },
         )
         .reduce(
-            || HashMap::new(),
+            || HashMap::<&str, u64>::default(),
             |mut a, b| {
                 for (token, count) in b {
                     *a.entry(token).or_insert(0) += count;
@@ -171,7 +173,7 @@ fn pretokenize_strings(strings: Vec<&str>, pattern: &str) -> (Vec<Sentence>, Vec
 }
 
 fn initialize_vocab_bytes(vocab_size: usize) -> (HashMap<Vec<u8>, u32>, Vec<Vec<u8>>) {
-    let mut word_to_id: HashMap<Vec<u8>, u32> = HashMap::with_capacity(vocab_size);
+    let mut word_to_id: HashMap<Vec<u8>, u32> = HashMap::default();
     let mut id_to_word: Vec<Vec<u8>> = Vec::with_capacity(vocab_size);
     for i in 0..=255 {
         word_to_id.insert(vec![i], i as u32);
@@ -189,8 +191,8 @@ fn get_most_frequent_pair(
         .par_iter()
         .enumerate()
         .map(|(i, sentence)| {
-            let mut local_pair_counts = HashMap::new();
-            let mut local_pair_positions: HashMap<Pair, HashSet<usize>> = HashMap::new();
+            let mut local_pair_counts = HashMap::<Pair, i64>::default();
+            let mut local_pair_positions: HashMap<Pair, HashSet<usize>> = HashMap::default();
 
             for window in sentence.get_symbols().windows(2) {
                 let current_pair: Pair = (window[0], window[1]);
@@ -207,7 +209,7 @@ fn get_most_frequent_pair(
                         h.insert(i);
                     })
                     .or_insert_with(|| {
-                        let mut h = HashSet::new();
+                        let mut h = HashSet::<usize>::default();
                         h.insert(i);
                         h
                     });
@@ -215,7 +217,12 @@ fn get_most_frequent_pair(
             (local_pair_counts, local_pair_positions)
         })
         .reduce(
-            || (HashMap::new(), HashMap::new()),
+            || {
+                (
+                    HashMap::<Pair, i64>::default(),
+                    HashMap::<Pair, HashSet<usize>>::default(),
+                )
+            },
             |(mut global_pair_counts, mut global_pair_positions), (pc, wtu)| {
                 // Merge the pair counts and positions from all sentences
                 for (k, v) in pc {
@@ -318,7 +325,7 @@ fn build_bpe_vocab(
                         h.insert(iw);
                     })
                     .or_insert_with(|| {
-                        let mut h = HashSet::new();
+                        let mut h = HashSet::<usize>::default();
                         h.insert(iw);
                         h
                     });
