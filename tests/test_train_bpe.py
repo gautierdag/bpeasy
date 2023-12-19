@@ -11,7 +11,7 @@ def test_train_bpe_vocab_size():
         max_token_length,
         vocab_size,
     )
-    assert len(vocab) == 266
+    assert len(vocab) == 267
 
 
 def test_train_bpe_max_token_length():
