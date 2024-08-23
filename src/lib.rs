@@ -146,6 +146,7 @@ fn pretokenize<'a>(text: &'a str, regex: &Regex) -> Vec<&'a str> {
 
 fn pretokenize_strings(strings: Vec<&str>, pattern: &str) -> (Vec<Sentence>, Vec<u64>) {
     let regex: Regex = Regex::new(pattern).expect("Invalid regex pattern");
+    // Tokenize strings in parallel
     let (tokens, counts): (Vec<&str>, Vec<u64>) = strings
         .par_iter()
         .flat_map(|&text| pretokenize(text, &regex))
@@ -168,8 +169,15 @@ fn pretokenize_strings(strings: Vec<&str>, pattern: &str) -> (Vec<Sentence>, Vec
         .into_iter()
         .unzip();
 
-    let sentences: Vec<Sentence> = tokens.into_iter().map(Sentence::from_str).collect();
-    (sentences, counts)
+    // Convert tokens to sentences and filter sentences and counts to remove single byte sentences
+    let (filtered_sentences, filtered_counts): (Vec<Sentence>, Vec<u64>) = tokens
+        .into_iter()
+        .map(Sentence::from_str)
+        .zip(counts.into_iter())
+        .filter(|(sentence, _)| sentence.symbols.len() > 1)
+        .unzip();
+
+    (filtered_sentences, filtered_counts)
 }
 
 fn initialize_vocab_bytes(vocab_size: usize) -> (HashMap<Vec<u8>, u32>, Vec<Vec<u8>>) {
@@ -412,11 +420,15 @@ fn bpeasy(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
 mod tests {
     #[test]
     fn test_all() {
-        let text: &str = "\tYou hear £ £ £ here";
+        let text: &str = "\tYou hear a £ £ £ here";
         let pattern = r"([^\s]+)|(\s+)";
-        let compiled_regex = fancy_regex::Regex::new(pattern).expect("Invalid regex pattern");
+        let compiled_regex: fancy_regex::Regex =
+            fancy_regex::Regex::new(pattern).expect("Invalid regex pattern");
         let pretokenized_sentences = crate::pretokenize(text, &compiled_regex);
-        println!("{:?}", pretokenized_sentences);
+        assert_eq!(
+            pretokenized_sentences,
+            vec!["\t", "You", " ", "hear", " ", "a", " ", "£", " ", "£", " ", "£", " ", "here"]
+        );
 
         let text_2: &str = "You hear £ £ £ here";
 

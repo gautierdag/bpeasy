@@ -4,8 +4,8 @@ Using varying vocab sizes from (5k:100k)
 
 | Library/Operation          | Time (seconds)                  | Standard Deviation             |
 |----------------------------|---------------------------------|--------------------------------|
-| HuggingFace Train          | 0.7369              | ±1.55            |
-| `bpeasy` Train               | 0.6528               | ±0.386            |
+| HuggingFace Train          | 0.8165              | ±0.62            |
+| `bpeasy` Train               | 0.68815               | ±0.41            |
 | HuggingFace Encode         | 0.6247              | ±0.051           |
 | `bpeasy` Encode (uses `tiktoken`)              | 0.2679             | ±0.035           |
 
