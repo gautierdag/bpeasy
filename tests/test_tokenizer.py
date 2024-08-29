@@ -80,3 +80,33 @@ def test_conversion_to_huggingface(mock_json_dump, mock_open):
     mock_json_dump.assert_called_once()
     args, _ = mock_json_dump.call_args
     assert args[0]["model"]["type"] == "BPE"
+
+
+@mock.patch("builtins.open", new_callable=mock.mock_open)
+@mock.patch("json.dump")
+def test_conversion_to_huggingface_with_special_tokens(mock_json_dump, mock_open):
+    vocab = {
+        b"h": 0,
+        b"e": 1,
+        b"l": 2,
+        b"o": 3,
+        b" ": 4,
+        b"w": 5,
+        b"r": 6,
+        b"d": 7,
+        b"he": 8,
+        b"ll": 9,
+        b"llo": 10,
+        b"hello": 11,
+        b"wo": 12,
+        b"wor": 13,
+        b"ld": 14,
+        b"world": 15,
+        b" world": 16,
+    }
+    tokenizer = BPEasyTokenizer(vocab=vocab, special_tokens=["<|special-0|>", "<pad>"])
+    tokenizer.export_to_huggingface_format("dummy_path.json")
+    mock_open.assert_called_once_with("dummy_path.json", "w", encoding="utf-8")
+    mock_json_dump.assert_called_once()
+    args, _ = mock_json_dump.call_args
+    assert args[0]["model"]["type"] == "BPE"

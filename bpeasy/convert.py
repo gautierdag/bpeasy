@@ -74,6 +74,10 @@ def convert_tiktoken_to_huggingface(
         vocab = {}
         i = 0
         for token, rank in mergeable_ranks.items():
+            # Skip special tokens as they are added separately
+            if token_bytes_to_string(token) in encoder._special_tokens:
+                continue
+
             vocab[token_bytes_to_string(token)] = rank
 
             i += 1
