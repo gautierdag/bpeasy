@@ -20,12 +20,7 @@ jobs:
         with:
           python-version: "3.10"
           cache: "pip"
-      - uses: actions-rs/toolchain@v1
-        with:
-          toolchain: stable
-          override: true
-          profile: minimal
-          components: llvm-tools-preview
+      - uses: dtolnay/rust-toolchain@stable
       - name: Setup virtual environment
         run: |
           python -m venv venv
