@@ -157,3 +157,20 @@ Contributions are welcome! Please open an issue if you have any suggestions or i
 ## License
 
 This project is licensed under the MIT License.
+
+## Citation
+
+If you use `bpeasy` in your research, please cite the following paper:
+
+```bash
+@software{bpeasy,
+  author = {Gautier Dagan},
+  title = {bpeasy},
+  year = {2024},
+  url = {https://github.com/gautierdag/bpeasy},
+  repository = {https://github.com/gautierdag/bpeasy},
+  author-email = {gautier.dagan@ed.ac.uk},
+  affiliation = {University of Edinburgh},
+  orcid = {https://orcid.org/0000-0002-1867-4201}
+}
+```

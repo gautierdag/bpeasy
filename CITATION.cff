@@ -1,0 +1,15 @@
+cff-version: 1.2.0
+title: bpeasy
+message: >-
+  If you use this software, please cite it using the
+  metadata from this file.
+type: software
+authors:
+  - given-names: Gautier
+    family-names: Dagan
+    email: gautier.dagan@ed.ac.uk
+    affiliation: University of Edinburgh
+    orcid: 'https://orcid.org/0000-0002-1867-4201'
+repository-code: 'https://github.com/gautierdag/bpeasy'
+url: 'https://github.com/gautierdag/bpeasy'
+license: MIT
