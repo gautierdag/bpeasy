@@ -13,12 +13,13 @@ jobs:
     strategy:
       matrix:
         os: ["ubuntu"]
+        python-version: ["3.10", "3.13"]
     runs-on: ${{ matrix.os }}-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.10"
+          python-version: ${{ matrix.python-version }}
           cache: "pip"
       - uses: dtolnay/rust-toolchain@stable
       - name: Setup virtual environment
@@ -39,11 +40,12 @@ jobs:
     strategy:
       matrix:
         target: [x86_64, x86, aarch64, armv7, s390x, ppc64le]
+        python-version: ["3.10", "3.13"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.10"
+          python-version: ${{ matrix.python-version }}
       - name: Build wheels
         uses: PyO3/maturin-action@v1
         with:
@@ -54,7 +56,7 @@ jobs:
       - name: Upload wheels
         uses: actions/upload-artifact@v4
         with:
-          name: dist-linux-${{ matrix.target }}
+          name: dist-linux-${{ matrix.target }}-py${{ matrix.python-version }}
           path: dist
 
   windows:
@@ -63,11 +65,12 @@ jobs:
     strategy:
       matrix:
         target: [x64, x86]
+        python-version: ["3.10", "3.13"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.10"
+          python-version: ${{ matrix.python-version }}
           architecture: ${{ matrix.target }}
       - name: Build wheels
         uses: PyO3/maturin-action@v1
@@ -78,7 +81,7 @@ jobs:
       - name: Upload wheels
         uses: actions/upload-artifact@v4
         with:
-          name: dist-windows-${{ matrix.target }}
+          name: dist-windows-${{ matrix.target }}-py${{ matrix.python-version }}
           path: dist
 
   macos:
@@ -87,11 +90,12 @@ jobs:
     strategy:
       matrix:
         target: [x86_64, aarch64]
+        python-version: ["3.10", "3.13"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.10"
+          python-version: ${{ matrix.python-version }}
       - name: Build wheels
         uses: PyO3/maturin-action@v1
         with:
@@ -101,7 +105,7 @@ jobs:
       - name: Upload wheels
         uses: actions/upload-artifact@v4
         with:
-          name: dist-macos-${{ matrix.target }}
+          name: dist-macos-${{ matrix.target }}-py${{ matrix.python-version }}
           path: dist
 
   sdist:
