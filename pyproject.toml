@@ -14,11 +14,12 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "License :: OSI Approved :: MIT License",
 ]
 dynamic = ["version"]
 description = "Fast bare-bones BPE for modern tokenizer training"
-authors = [{author = "Gautier Dagan", email = "<gautier.dagan@ed.ac.uk>"}]
+authors = [{name = "Gautier Dagan", email = "<gautier.dagan@ed.ac.uk>"}]
 license = "MIT"
 readme = "README.md"
 homepage = "https://github.com/gautierdag/bpeasy"
