@@ -4,7 +4,7 @@ from typing import Iterator
 
 import tiktoken
 
-from .bpeasy import train_bpe
+from .bpeasy import train_bpe_stream
 from .convert import convert_tiktoken_to_huggingface
 
 
@@ -110,8 +110,9 @@ class BPEasyTokenizer:
         special_tokens: list[str] = [],
         fill_to_nearest_multiple_of_eight=False,
         name="bpeasy",
+        batch_size: int = 1000,
     ) -> "BPEasyTokenizer":
-        bytes_vocab = train_bpe(iterator, regex_pattern, max_token_length, vocab_size)
+        bytes_vocab = train_bpe_stream(iterator, regex_pattern, max_token_length, vocab_size, batch_size)
         return cls(
             name=name,
             vocab=bytes_vocab,

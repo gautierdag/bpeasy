@@ -1,4 +1,4 @@
-from bpeasy import train_bpe
+from bpeasy import train_bpe, train_bpe_stream
 
 
 def test_train_bpe_vocab_size():
@@ -10,6 +10,20 @@ def test_train_bpe_vocab_size():
         regex,
         max_token_length,
         vocab_size,
+    )
+    assert len(vocab) == 267
+
+
+def test_train_bpe_stream_vocab_size():
+    vocab_size = 300
+    max_token_length = 4
+    regex = r"([^\s]+)|(\s+)"
+    vocab = train_bpe_stream(
+        iter(["This is a test", "this is another test", "good tests"]),
+        regex,
+        max_token_length,
+        vocab_size,
+        batch_size=1,
     )
     assert len(vocab) == 267
 

@@ -144,41 +144,6 @@ fn pretokenize<'a>(text: &'a str, regex: &Regex) -> Vec<&'a str> {
         .collect()
 }
 
-fn pretokenize_strings(strings: Vec<&str>, pattern: &str) -> (Vec<Sentence>, Vec<u64>) {
-    let regex: Regex = Regex::new(pattern).expect("Invalid regex pattern");
-    // Tokenize strings in parallel
-    let (tokens, counts): (Vec<&str>, Vec<u64>) = strings
-        .par_iter()
-        .flat_map(|&text| pretokenize(text, &regex))
-        .fold(
-            || HashMap::<&str, u64>::default(),
-            |mut acc, token| {
-                *acc.entry(token).or_insert(0) += 1;
-                acc
-            },
-        )
-        .reduce(
-            || HashMap::<&str, u64>::default(),
-            |mut a, b| {
-                for (token, count) in b {
-                    *a.entry(token).or_insert(0) += count;
-                }
-                a
-            },
-        )
-        .into_iter()
-        .unzip();
-
-    // Convert tokens to sentences and filter sentences and counts to remove single byte sentences
-    let (filtered_sentences, filtered_counts): (Vec<Sentence>, Vec<u64>) = tokens
-        .into_iter()
-        .map(Sentence::from_str)
-        .zip(counts.into_iter())
-        .filter(|(sentence, _)| sentence.symbols.len() > 1)
-        .unzip();
-
-    (filtered_sentences, filtered_counts)
-}
 
 fn initialize_vocab_bytes(vocab_size: usize) -> (HashMap<Vec<u8>, u32>, Vec<Vec<u8>>) {
     let mut word_to_id: HashMap<Vec<u8>, u32> = HashMap::default();
@@ -351,55 +316,158 @@ fn build_bpe_vocab(
     word_to_id
 }
 
-// Train BPE from Iterator
+
+// Helper function to process a batch in parallel
+fn tokenize_strings(batch: &[String], regex: &Regex) -> HashMap<String, u64> {
+    batch
+        .par_iter()
+        .flat_map(|text| pretokenize(text, regex))
+        .fold(
+            || HashMap::<String, u64>::default(),
+            |mut acc, token| {
+                *acc.entry(token.to_string()).or_insert(0) += 1;
+                acc
+            },
+        )
+        .reduce(
+            || HashMap::<String, u64>::default(),
+            |mut a, b| {
+                for (token, count) in b {
+                    *a.entry(token).or_insert(0) += count;
+                }
+                a
+            },
+        )
+}
+
+// Helper function to merge token counts
+fn merge_token_counts(global: &mut HashMap<String, u64>, batch: HashMap<String, u64>) {
+    for (token, count) in batch {
+        *global.entry(token).or_insert(0) += count;
+    }
+}
+
+// Extracted validation function (non-PyO3 version for testing)
+fn validate_bpe_parameters_internal(
+    max_token_length: usize,
+    vocab_size: usize,
+    regex: &str,
+    batch_size: usize,
+) -> Result<(), String> {
+    if max_token_length < 2 {
+        return Err("max_token_length must be greater than 1".to_string());
+    }
+    if vocab_size < 256 {
+        return Err("vocab_size must be greater than 256".to_string());
+    }
+    if regex.is_empty() {
+        return Err("regex cannot be empty".to_string());
+    }
+    if batch_size < 1 {
+        return Err("batch_size must be greater than 0".to_string());
+    }
+    Ok(())
+}
+
+// PyO3 wrapper for validation
+fn validate_bpe_parameters(
+    max_token_length: usize,
+    vocab_size: usize,
+    regex: &str,
+    batch_size: usize,
+) -> PyResult<()> {
+    validate_bpe_parameters_internal(max_token_length, vocab_size, regex, batch_size)
+        .map_err(|e| exceptions::PyValueError::new_err(e))
+}
+
+// Extracted batch processing function
+fn process_iterator_in_batches(
+    iterator: &PyIterator,
+    regex: &Regex,
+    batch_size: usize,
+) -> PyResult<HashMap<String, u64>> {
+    let mut token_counts = HashMap::<String, u64>::default();
+    let mut batch: Vec<String> = Vec::with_capacity(batch_size);
+    
+    // Process iterator in batches for parallel processing
+    for item_result in iterator {
+        if let Ok(item) = item_result {
+            if let Ok(py_string) = item.extract::<&PyString>() {
+                if let Ok(text) = py_string.to_str() {
+                    if !text.is_empty() {
+                        batch.push(text.to_string());
+                        
+                        // Process batch when full
+                        if batch.len() >= batch_size {
+                            let batch_counts = tokenize_strings(&batch, regex);
+                            merge_token_counts(&mut token_counts, batch_counts);
+                            batch.clear();
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    // Process remaining items in batch
+    if !batch.is_empty() {
+        let batch_counts = tokenize_strings(&batch, regex);
+        merge_token_counts(&mut token_counts, batch_counts);
+    }
+    
+    Ok(token_counts)
+}
+
+// Extracted token filtering function
+fn filter_tokens_to_sentences(token_counts: HashMap<String, u64>) -> (Vec<Sentence>, Vec<u64>) {
+    let (tokens, counts): (Vec<String>, Vec<u64>) = token_counts.into_iter().unzip();
+    let token_refs: Vec<&str> = tokens.iter().map(|s| s.as_str()).collect();
+    
+    // Convert tokens to sentences and filter
+    token_refs
+        .into_iter()
+        .map(Sentence::from_str)
+        .zip(counts.into_iter())
+        .filter(|(sentence, _)| sentence.symbols.len() > 1)
+        .unzip()
+}
+
+// Refactored main function
 #[pyfunction]
-fn train_bpe(
+fn train_bpe_stream(
     py: Python,
     iterator: &PyIterator,
     python_regex: &PyString,
     max_token_length: usize,
     vocab_size: usize,
+    batch_size: usize,
 ) -> PyResult<PyObject> {
-    let regex = python_regex.to_str()?;
-
-    // validate inputs
-    if max_token_length < 2 {
-        return Err(exceptions::PyValueError::new_err(
-            "max_token_length must be greater than 1",
-        ));
-    }
-    if vocab_size < 256 {
-        return Err(exceptions::PyValueError::new_err(
-            "vocab_size must be greater than 256",
-        ));
-    }
-    if regex.is_empty() {
-        return Err(exceptions::PyValueError::new_err("regex cannot be empty"));
-    }
-
-    // Extract strings from Python iterator and store them in a Rust Vec for parallel processing
-    let strings: Vec<&str> = iterator
-        .filter_map(|item_result| {
-            item_result.ok().and_then(|item| {
-                item.extract::<&PyString>()
-                    .ok()
-                    .and_then(|py_string| py_string.to_str().ok())
-            })
-        })
-        .filter(|text| !text.is_empty())
-        .collect();
-
-    let (pretokenized_sentences, counts): (Vec<Sentence>, Vec<u64>) =
-        pretokenize_strings(strings, regex);
-
+    let regex_str = python_regex.to_str()?;
+    
+    // Validate inputs
+    validate_bpe_parameters(max_token_length, vocab_size, regex_str, batch_size)?;
+    
+    // Compile regex
+    let compiled_regex = Regex::new(regex_str).map_err(|e| 
+        exceptions::PyValueError::new_err(format!("Invalid regex: {}", e))
+    )?;
+    
+    // Process iterator and collect token counts
+    let token_counts = process_iterator_in_batches(iterator, &compiled_regex, batch_size)?;
+    
+    // Filter tokens and convert to sentences
+    let (filtered_sentences, filtered_counts) = filter_tokens_to_sentences(token_counts);
+    
+    // Build BPE vocabulary
     let bpe_vocab = build_bpe_vocab(
-        pretokenized_sentences,
-        &counts,
+        filtered_sentences,
+        &filtered_counts,
         max_token_length,
         vocab_size,
     );
+    
+    // Convert to Python dictionary
     let python_dict_out = PyDict::new(py);
-    // convert bpe_vocab to python dict
     for (key, value) in bpe_vocab {
         let py_key = PyBytes::new(py, &key);
         python_dict_out.set_item(py_key, value)?;
@@ -412,34 +480,46 @@ fn train_bpe(
 /// as a Python dictionary.
 #[pymodule]
 fn bpeasy(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
-    m.add_function(wrap_pyfunction!(train_bpe, m)?)?;
+    m.add_function(wrap_pyfunction!(train_bpe_stream, m)?)?;
     Ok(())
 }
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+    
     #[test]
     fn test_all() {
         let text: &str = "\tYou hear a £ £ £ here";
         let pattern = r"([^\s]+)|(\s+)";
         let compiled_regex: fancy_regex::Regex =
             fancy_regex::Regex::new(pattern).expect("Invalid regex pattern");
-        let pretokenized_sentences = crate::pretokenize(text, &compiled_regex);
+        let pretokenized_text = crate::pretokenize(text, &compiled_regex);
         assert_eq!(
-            pretokenized_sentences,
+            pretokenized_text,
             vec!["\t", "You", " ", "hear", " ", "a", " ", "£", " ", "£", " ", "£", " ", "here"]
         );
 
         let text_2: &str = "You hear £ £ £ here";
+        let pretokenized_text_2 = crate::pretokenize(text_2, &compiled_regex);
 
-        let (pretokenized_sentences, _counts) =
-            crate::pretokenize_strings(vec![text, text_2], pattern);
+        // Create sentences from pretokenized text
+        let mut sentences = Vec::new();
+        let mut counts = Vec::new();
+        
+        for token in pretokenized_text.iter().chain(pretokenized_text_2.iter()) {
+            let sentence = crate::Sentence::from_str(token);
+            if sentence.symbols.len() > 1 {
+                sentences.push(sentence);
+                counts.push(1u64);
+            }
+        }
 
         let vocab_size = 300;
         let max_token_length = 128;
         crate::build_bpe_vocab(
-            pretokenized_sentences,
-            &_counts,
+            sentences,
+            &counts,
             max_token_length,
             vocab_size,
         );
@@ -449,5 +529,61 @@ mod tests {
     fn test_initialize_vocab_bytes() {
         let vocab = crate::initialize_vocab_bytes(400);
         assert_eq!(vocab.0.len(), 256);
+    }
+    
+    #[test]
+    fn test_validate_bpe_parameters() {
+        // Valid parameters should pass
+        assert!(validate_bpe_parameters_internal(10, 300, "test", 100).is_ok());
+        
+        // Invalid max_token_length
+        assert!(validate_bpe_parameters_internal(1, 300, "test", 100).is_err());
+        
+        // Invalid vocab_size
+        assert!(validate_bpe_parameters_internal(10, 200, "test", 100).is_err());
+        
+        // Empty regex
+        assert!(validate_bpe_parameters_internal(10, 300, "", 100).is_err());
+        
+        // Invalid batch_size
+        assert!(validate_bpe_parameters_internal(10, 300, "test", 0).is_err());
+    }
+    
+    #[test]
+    fn test_filter_tokens_to_sentences() {
+        let mut token_counts = HashMap::default();
+        token_counts.insert("a".to_string(), 5u64);      // Single char - should be filtered
+        token_counts.insert("hello".to_string(), 10u64); // Multi char - should be kept
+        token_counts.insert("world".to_string(), 3u64);  // Multi char - should be kept
+        
+        let (sentences, counts) = filter_tokens_to_sentences(token_counts);
+        
+        assert_eq!(sentences.len(), 2);
+        assert_eq!(counts.len(), 2);
+        
+        // Check that all sentences have more than 1 symbol
+        for sentence in &sentences {
+            assert!(sentence.symbols.len() > 1);
+        }
+        
+        // Check that counts match (order might vary due to HashMap)
+        let total_count: u64 = counts.iter().sum();
+        assert_eq!(total_count, 13); // 10 + 3, excluding the single char token
+    }
+    
+    #[test]
+    fn test_merge_token_counts() {
+        let mut global = HashMap::default();
+        global.insert("hello".to_string(), 5u64);
+        
+        let mut batch = HashMap::default();
+        batch.insert("hello".to_string(), 3u64);
+        batch.insert("world".to_string(), 2u64);
+        
+        merge_token_counts(&mut global, batch);
+        
+        assert_eq!(global.get("hello"), Some(&8u64));
+        assert_eq!(global.get("world"), Some(&2u64));
+        assert_eq!(global.len(), 2);
     }
 }

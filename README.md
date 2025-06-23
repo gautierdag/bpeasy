@@ -38,6 +38,7 @@ vocab = bpeasy.train_bpe(
     regex_pattern,
     args.max_sentencepiece_length, # max length of tokens
     args.vocab_size, # max size of vocab
+    args.batch_size, # number of items to pretokenize/count at once (default: 1000)
 )
 ```
 
@@ -57,6 +58,8 @@ tokenizer = BPEasyTokenizer.train(
 )
 ```
 
+Note on `batch_size`: The `batch_size` parameter controls how many items are pretokenized and counted at once. A larger batch size will be faster but will use more memory. The default is 1000. If all your texts/strings can fit in memory, you can set this to the size of your dataset to speed up the process. If you are working with a large dataset, you can set this to a smaller value to limit memory issues.
+
 ### Encoding/Decoding
 
 To test your tokenizer you can use the `BPEasyTokenizer` class, which is a wrapper around the `tiktoken.Encoding` module, simplifying the handling of vocabularies, special tokens, and regex patterns for tokenization.
@@ -71,7 +74,8 @@ tokenizer = BPEasyTokenizer(
     regex_pattern=regex_pattern,
     special_tokens=your_special_tokens,
     fill_to_nearest_multiple_of_eight=True, # pad vocab to multiple of 8
-    name="bpeasy" # optional name for the tokenizer
+    name="bpeasy" # optional name for the tokenizer,
+    batch_size=1000, # optional batch size for the number of items to pretokenize/count at once
 )
 
 test = "hello_world"

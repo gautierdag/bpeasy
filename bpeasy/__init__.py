@@ -1,15 +1,29 @@
 from importlib.metadata import version
 
-from .bpeasy import train_bpe
+from .bpeasy import train_bpe_stream
 
 __version__ = version("bpeasy")
 
+def train_bpe(
+    iterator,
+    python_regex: str,
+    max_token_length: int,
+    vocab_size: int,
+    batch_size: int = 1000,
+) -> dict[bytes, int]:
+    """
+    Train a BPE tokenizer on the given iterator of strings.
+    
+    Args:
+        iterator: An iterator over strings to train the BPE tokenizer on.
+        python_regex: A regex pattern to use for tokenization.
+        max_token_length: The maximum length of tokens.
+        vocab_size: The desired vocabulary size.
+        batch_size (default: 1000): The number of samples to process in each batch (how many iterator items to process at once).
 
-__all__ = [
-    "save_vocab_to_tiktoken",
-    "train_bpe",
-    "__version__",
-]
+    Returns a vocabulary mapping bytes to integer ranks.
+    """
+    return train_bpe_stream(iterator, python_regex, max_token_length, vocab_size, batch_size)
 
 
 def save_vocab_to_tiktoken(
@@ -38,3 +52,11 @@ def save_vocab_to_tiktoken(
         for token, rank in sorted_vocab:
             # encode token to base64 and write to file with rank separated by a space
             f.write(base64.b64encode(token) + b" " + str(rank).encode("utf-8") + b"\n")
+
+
+__all__ = [
+    "save_vocab_to_tiktoken",
+    "train_bpe",
+    "train_bpe_stream",
+    "__version__",
+]
