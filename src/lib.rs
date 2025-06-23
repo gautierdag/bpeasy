@@ -355,12 +355,12 @@ fn build_bpe_vocab(
 #[pyfunction]
 fn train_bpe(
     py: Python,
-    iterator: &PyIterator,
-    python_regex: &PyString,
+    iterator: Bound<PyIterator>,
+    python_regex: Bound<PyString>,
     max_token_length: usize,
     vocab_size: usize,
 ) -> PyResult<PyObject> {
-    let regex = python_regex.to_str()?;
+    let regex = python_regex.to_string_lossy();
 
     // validate inputs
     if max_token_length < 2 {
@@ -378,19 +378,22 @@ fn train_bpe(
     }
 
     // Extract strings from Python iterator and store them in a Rust Vec for parallel processing
-    let strings: Vec<&str> = iterator
+    let strings: Vec<String> = iterator
+        .try_iter()?
         .filter_map(|item_result| {
             item_result.ok().and_then(|item| {
-                item.extract::<&PyString>()
+                item.downcast::<PyString>()
                     .ok()
-                    .and_then(|py_string| py_string.to_str().ok())
+                    .map(|py_string| py_string.to_string_lossy().to_string())
             })
         })
         .filter(|text| !text.is_empty())
         .collect();
 
+    let string_refs: Vec<&str> = strings.iter().map(|s| s.as_str()).collect();
+
     let (pretokenized_sentences, counts): (Vec<Sentence>, Vec<u64>) =
-        pretokenize_strings(strings, regex);
+        pretokenize_strings(string_refs, &regex);
 
     let bpe_vocab = build_bpe_vocab(
         pretokenized_sentences,
@@ -411,7 +414,7 @@ fn train_bpe(
 /// It is designed to be used as a Python module and returns a byte-pair vocabulary
 /// as a Python dictionary.
 #[pymodule]
-fn bpeasy(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
+fn bpeasy(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(train_bpe, m)?)?;
     Ok(())
 }
