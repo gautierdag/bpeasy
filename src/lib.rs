@@ -382,7 +382,7 @@ fn validate_bpe_parameters(
 
 // Extracted batch processing function
 fn process_iterator_in_batches(
-    iterator: &PyIterator,
+    iterator: Bound<PyIterator>,
     regex: &Regex,
     batch_size: usize,
 ) -> PyResult<HashMap<String, u64>> {
@@ -392,17 +392,15 @@ fn process_iterator_in_batches(
     // Process iterator in batches for parallel processing
     for item_result in iterator {
         if let Ok(item) = item_result {
-            if let Ok(py_string) = item.extract::<&PyString>() {
-                if let Ok(text) = py_string.to_str() {
-                    if !text.is_empty() {
-                        batch.push(text.to_string());
-                        
-                        // Process batch when full
-                        if batch.len() >= batch_size {
-                            let batch_counts = tokenize_strings(&batch, regex);
-                            merge_token_counts(&mut token_counts, batch_counts);
-                            batch.clear();
-                        }
+            if let Ok(py_string) = item.downcast::<PyString>() {
+                let text = py_string.to_string_lossy().to_string();
+                if !text.is_empty() {
+                    batch.push(text);
+                    // Process batch when full
+                    if batch.len() >= batch_size {
+                        let batch_counts = tokenize_strings(&batch, regex);
+                        merge_token_counts(&mut token_counts, batch_counts);
+                        batch.clear();
                     }
                 }
             }
@@ -414,7 +412,6 @@ fn process_iterator_in_batches(
         let batch_counts = tokenize_strings(&batch, regex);
         merge_token_counts(&mut token_counts, batch_counts);
     }
-    
     Ok(token_counts)
 }
 
@@ -436,19 +433,19 @@ fn filter_tokens_to_sentences(token_counts: HashMap<String, u64>) -> (Vec<Senten
 #[pyfunction]
 fn train_bpe_stream(
     py: Python,
-    iterator: &PyIterator,
-    python_regex: &PyString,
+    iterator: Bound<PyIterator>,
+    python_regex: Bound<PyString>,
     max_token_length: usize,
     vocab_size: usize,
     batch_size: usize,
 ) -> PyResult<PyObject> {
-    let regex_str = python_regex.to_str()?;
+    let regex_str = python_regex.to_string_lossy();
     
     // Validate inputs
-    validate_bpe_parameters(max_token_length, vocab_size, regex_str, batch_size)?;
+    validate_bpe_parameters(max_token_length, vocab_size, &regex_str, batch_size)?;
     
     // Compile regex
-    let compiled_regex = Regex::new(regex_str).map_err(|e| 
+    let compiled_regex = Regex::new(&regex_str).map_err(|e| 
         exceptions::PyValueError::new_err(format!("Invalid regex: {}", e))
     )?;
     
@@ -479,7 +476,7 @@ fn train_bpe_stream(
 /// It is designed to be used as a Python module and returns a byte-pair vocabulary
 /// as a Python dictionary.
 #[pymodule]
-fn bpeasy(_py: Python<'_>, m: &PyModule) -> PyResult<()> {
+fn bpeasy(m: &Bound<'_, PyModule>) -> PyResult<()> {
     m.add_function(wrap_pyfunction!(train_bpe_stream, m)?)?;
     Ok(())
 }
